@@ -22,3 +22,4 @@ export type BackupPlan = { id: string; targetId: string; scriptRef: string; requ
 export type BackupArtifact = { id: string; targetId: string; artifactRef?: string; checksum?: string; status: string; scopeFromVersion?: string; scopeToVersion?: string; createdAt: string; expiresAt?: string };
 export type Preflight = { planId: string; passed: boolean; checks: Array<{ name: string; status: string; detail?: string }> };
 export type AuditEvent = { id: string; actorId: string; action: string; resourceType: string; resourceId: string; metadata: Record<string, unknown>; createdAt: string };
+export type SecretMetadata = { secretRef: string; tenantId?: string; kind: 'DATABASE_CONNECTION' | 'GIT_CREDENTIAL'; version: number; createdAt: string; updatedAt: string; createdBy: string; updatedBy: string; description?: string };

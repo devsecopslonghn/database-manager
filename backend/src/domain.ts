@@ -41,7 +41,7 @@ export type Target = {
   createdAt: string;
 };
 
-export type SecretBackend = 'kubernetes' | 'vault' | 'external-secrets';
+export type SecretBackend = 'database' | 'kubernetes' | 'vault' | 'external-secrets';
 export type SslMode = 'disable' | 'require' | 'verify-ca' | 'verify-full';
 export type ConnectionTestStatus = 'HEALTHY' | 'FAILED' | 'TIMEOUT' | 'AUTHENTICATION_FAILED' | 'NETWORK_UNREACHABLE' | 'SCHEMA_UNAVAILABLE';
 

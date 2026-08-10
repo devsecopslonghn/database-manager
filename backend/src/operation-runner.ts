@@ -1,5 +1,4 @@
 import { createDatabaseAdapter, type SecretResolver } from './database-adapters.js';
-import { KubernetesConnectionSecretStore } from './secret-store.js';
 import type { Store } from './store.js';
 
 function timestamp(): string { return new Date().toISOString(); }
@@ -12,7 +11,7 @@ async function backupGate(store: Store, targetId: string): Promise<void> {
   }
 }
 
-export async function executeOperation(store: Store, operationId: string, resolver: SecretResolver = new KubernetesConnectionSecretStore()): Promise<void> {
+export async function executeOperation(store: Store, operationId: string, resolver: SecretResolver): Promise<void> {
   const operation = (await store.listOperations()).find((item) => item.id === operationId);
   if (!operation) return;
   if (operation.type === 'UNDO') { await executeUndoOperation(store, operation, resolver); return; }

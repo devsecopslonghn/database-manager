@@ -4,7 +4,7 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import AuthButton from './AuthButton';
 
-const links = [['/', 'Dashboard'], ['/projects', 'Projects'], ['/audit', 'Audit log'], ['/admin/access', 'RBAC administration'], ['/manual-migration', 'Manual SQL']];
+const links = [['/', 'Dashboard'], ['/projects', 'Projects'], ['/secrets', 'Secrets'], ['/audit', 'Audit log'], ['/admin/access', 'RBAC administration'], ['/manual-migration', 'Manual SQL']];
 
 export default function AppShell({ children, breadcrumb = 'Tenant / Control plane' }: { children: React.ReactNode; breadcrumb?: string }) {
   const pathname = usePathname();

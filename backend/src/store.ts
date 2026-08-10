@@ -19,6 +19,7 @@ export type AuditEventInput = {
   resourceId: string;
   metadata: Record<string, unknown>;
 };
+export type TenantAuditEventInput = { tenantId: string; actorId: string; action: string; resourceType: string; resourceId: string; metadata: Record<string, unknown> };
 export type CreateSnapshotInput = Omit<SourceSnapshot, 'id' | 'createdAt'> & { files: Array<Omit<MigrationFile, 'id' | 'snapshotId' | 'createdAt'>> };
 export type CreatePlanInput = Omit<MigrationPlan, 'id' | 'createdAt' | 'updatedAt' | 'items'> & { items: Array<Omit<MigrationPlanItem, 'id' | 'planId'>> };
 export type UpdateTargetConnectionInput = Omit<TargetConnection, 'engine' | 'credentialVersion' | 'lastTestStatus' | 'lastTestAt' | 'lastTestDurationMs' | 'lastTestError' | 'updatedAt' | 'updatedBy'> & { updatedBy: string; credentialVersion?: string };
@@ -43,6 +44,7 @@ export interface Store {
   getManualMigration(id: string): Promise<ManualMigration | undefined>;
   listManualMigrations(targetId: string): Promise<ManualMigration[]>;
   recordTargetAudit(input: AuditEventInput): Promise<void>;
+  recordTenantAudit(input: TenantAuditEventInput): Promise<void>;
   listAuditEvents(tenantId?: string, limit?: number): Promise<AuditEvent[]>;
   createSnapshot(input: CreateSnapshotInput): Promise<SourceSnapshot>;
   getSnapshot(id: string): Promise<SourceSnapshot | undefined>;
@@ -81,6 +83,7 @@ export class MemoryStore implements Store {
   readonly targets: Target[] = [];
   readonly manualMigrations: ManualMigration[] = [];
   readonly auditEvents: AuditEventInput[] = [];
+  readonly tenantAuditEvents: TenantAuditEventInput[] = [];
   readonly snapshots: SourceSnapshot[] = [];
   readonly migrationFiles: MigrationFile[] = [];
   readonly ledger: LedgerEntry[] = [];
@@ -142,8 +145,10 @@ export class MemoryStore implements Store {
   async getManualMigration(id: string): Promise<ManualMigration | undefined> { return this.manualMigrations.find((migration) => migration.id === id); }
   async listManualMigrations(targetId: string): Promise<ManualMigration[]> { return this.manualMigrations.filter((m) => m.targetId === targetId); }
   async recordTargetAudit(input: AuditEventInput): Promise<void> { this.auditEvents.push(input); }
+  async recordTenantAudit(input: TenantAuditEventInput): Promise<void> { this.tenantAuditEvents.push(input); }
   async listAuditEvents(_tenantId?: string, limit = 100): Promise<AuditEvent[]> {
-    return this.auditEvents.slice(-limit).reverse().map((event) => ({ ...event, id: randomUUID(), createdAt: now() }));
+    const events = [...this.auditEvents.map((event) => ({ ...event, tenantId: undefined })), ...this.tenantAuditEvents].slice(-limit).reverse();
+    return events.map((event) => ({ ...event, id: randomUUID(), createdAt: now() } as AuditEvent));
   }
 
   async createSnapshot(input: CreateSnapshotInput): Promise<SourceSnapshot> {
@@ -290,6 +295,9 @@ export class PostgresStore implements Store {
   }
   async recordTargetAudit(input: AuditEventInput): Promise<void> {
     await this.pool.query(`INSERT INTO schemaops.audit_events (tenant_id,actor_id,action,resource_type,resource_id,metadata) SELECT p.tenant_id,$2,$3,$4,$5,$6::jsonb FROM schemaops.targets t JOIN schemaops.projects p ON p.id=t.project_id WHERE t.id=$1`, [input.targetId,input.actorId,input.action,input.resourceType,input.resourceId,JSON.stringify(input.metadata)]);
+  }
+  async recordTenantAudit(input: TenantAuditEventInput): Promise<void> {
+    await this.pool.query(`INSERT INTO schemaops.audit_events (tenant_id,actor_id,action,resource_type,resource_id,metadata) VALUES ($1,$2,$3,$4,$5,$6::jsonb)`, [input.tenantId,input.actorId,input.action,input.resourceType,input.resourceId,JSON.stringify(input.metadata)]);
   }
   async listAuditEvents(tenantId?: string, limit = 100): Promise<AuditEvent[]> {
     const result = await this.pool.query(`SELECT id,tenant_id AS "tenantId",actor_id AS "actorId",action,resource_type AS "resourceType",resource_id AS "resourceId",metadata,created_at AS "createdAt" FROM schemaops.audit_events ${tenantId ? 'WHERE tenant_id=$1' : ''} ORDER BY created_at DESC LIMIT $${tenantId ? 2 : 1}`, tenantId ? [tenantId, limit] : [limit]);

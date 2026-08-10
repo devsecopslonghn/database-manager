@@ -5,7 +5,7 @@ import { join, relative } from 'node:path';
 import { promisify } from 'node:util';
 import { fingerprint } from './domain.js';
 import { parseMigrationFiles } from './migration-parser.js';
-import { KubernetesConnectionSecretStore } from './secret-store.js';
+import type { ManagedSecretStore } from './secret-store.js';
 import type { Store } from './store.js';
 
 const execFileAsync = promisify(execFile);
@@ -18,7 +18,7 @@ async function collectSqlFiles(root: string, directory: string, output: Array<{ 
   }
 }
 
-export async function syncProjectSource(store: Store, projectId: string, gitRef: string | undefined, actorId: string) {
+export async function syncProjectSource(store: Store, projectId: string, gitRef: string | undefined, actorId: string, secretManager?: Pick<ManagedSecretStore, 'readGitCredentials'>) {
   const projects = await store.listProjects();
   const project = projects.find((item) => item.id === projectId);
   if (!project) throw new Error('PROJECT_NOT_FOUND');
@@ -30,7 +30,7 @@ export async function syncProjectSource(store: Store, projectId: string, gitRef:
   try {
     const environment = { ...process.env, GIT_TERMINAL_PROMPT: '0' };
     if (project.gitSecretRef) {
-      const credentials = await new KubernetesConnectionSecretStore().readGitCredentials(project.gitSecretRef);
+      const credentials = await secretManager?.readGitCredentials(project.gitSecretRef, project.tenantId);
       if (!credentials) throw new Error('GIT_CREDENTIAL_SECRET_NOT_FOUND_OR_INVALID');
       askpass = join(workspace, '.git-askpass');
       await writeFile(askpass, '#!/bin/sh\ncase "$1" in *Username*) printf \'%s\' "$GIT_USERNAME" ;; *) printf \'%s\' "$GIT_TOKEN" ;; esac\n', { mode: 0o700 });
