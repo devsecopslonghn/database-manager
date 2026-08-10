@@ -1,0 +1,33 @@
+# Inject these catalogs through Jenkins Folder/System Properties.
+# Do not commit credentials, tokens or passwords here.
+
+nexusProfiles:
+  nexus-dev:
+    url: https://nexus.apps.drgdevlab.com
+    dockerRegistry: nexus.apps.drgdevlab.com
+
+artifactProfiles:
+  nexus-container-dev:
+    type: container
+    nexusProfile: nexus-dev
+    registry: nexus.apps.drgdevlab.com
+    repository: docker-releases
+
+gitopsProfiles:
+  drgdevlab-gitops:
+    url: git@github.com:devsecopslonghn/k8s-namepsace-chart.git
+
+deploymentProfiles:
+  database-manager-dev:
+    platform: gitops
+    strategy: gitops
+    gitopsProfile: drgdevlab-gitops
+    repository: git@github.com:devsecopslonghn/k8s-namepsace-chart.git
+    branch: master
+    valuesFile: database-manager/values.yaml
+    allowedVariables:
+      - application
+      - imageTag
+      - imageDigest
+      - releaseVersion
+    timeoutMinutes: 60

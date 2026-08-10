@@ -7,7 +7,7 @@
 
 - Use Next.js App Router
 - Use Fastify backend
-- MongoDB chosen
+- PostgreSQL control-plane database chosen
 - Do not use microservices
 
 
@@ -15,7 +15,7 @@
 
 - Personal project
 - Single deployment
-- Kubernetes later
+- Kubernetes deployment through Argo CD/GitOps
 
 
 ## Important Rules
