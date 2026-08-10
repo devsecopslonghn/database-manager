@@ -1,0 +1,9 @@
+'use client';
+
+import Link from 'next/link';
+import { useEffect, useState } from 'react';
+import AppShell from '../components/AppShell';
+import LoadingState from '../components/LoadingState';
+import { api, type Project } from '../../lib/api';
+
+export default function ProjectsPage() { const [projects,setProjects]=useState<Project[]>(); const [error,setError]=useState(''); useEffect(()=>{api<{items:Project[]}>('/projects').then((r)=>setProjects(r.items)).catch((e)=>setError(e instanceof Error?e.message:'PROJECTS_FAILED'));},[]); return <AppShell breadcrumb="Tenant / Projects"><div className="page-heading"><div><p className="eyebrow">PROJECTS</p><h1>Migration repositories</h1><p className="muted">Each project fixes one target database engine and can map to multiple environments.</p></div><button className="button primary" type="button" onClick={()=>setError('Create project API is available; use the onboarding form next.')}>New project</button></div>{error?<div className="alert danger-box">{error}</div>:null}{!projects&&!error?<LoadingState/>:null}<section className="panel">{projects?.length?<table><thead><tr><th>Project</th><th>Engine</th><th>Repository</th><th>Default ref</th><th>Migration path</th></tr></thead><tbody>{projects.map((project)=><tr key={project.id}><td><Link className="text-link" href={`/projects/${project.id}`}>{project.name}</Link><br/><span className="small muted">{project.id}</span></td><td><span className="code">{project.databaseEngine}</span></td><td className="truncate">{project.repositoryUrl}</td><td className="code">{project.defaultRef}</td><td className="code">{project.migrationPath}</td></tr>)}</tbody></table>:<div className="empty-state"><h2>No projects yet</h2><p className="muted">Create a project from the API or onboarding flow, then connect its Git source.</p><code>POST /api/v1/projects</code></div>}</section></AppShell>; }

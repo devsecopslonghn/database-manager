@@ -138,3 +138,16 @@ Webhook callback, signed callbacks và provider-specific status checks là phase
 - Không cho phép client gửi target connection secret trực tiếp vào execution payload.
 - Audit mọi approval, execute, cancel, undo, restore, reconcile và permission change.
 - Paginate logs/audit; giới hạn query time range và output size.
+
+## 6. Implemented control-plane slice
+
+The first production slice is available under `/api/v1`: dashboard/projects,
+project environments and targets, Git source sync, V/R/U inventory and ledger,
+plan creation/approval, manual UI migrations, operation queue/status/logs and
+audit events. The queue endpoint returns `202` with an operation ID.
+
+Execution is fail-closed. The worker only opens a target adapter when the
+target secret reference resolves to a mounted JSON connection document, the
+target lock is acquired and the plan is approved. `SCHEMAOPS_OPERATION_WORKER_ENABLED`
+must be explicitly enabled for a deployment; otherwise queueing is audited but
+does not touch a target database.

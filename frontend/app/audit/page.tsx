@@ -1,0 +1,8 @@
+'use client';
+
+import { useEffect, useState } from 'react';
+import AppShell from '../components/AppShell';
+import LoadingState from '../components/LoadingState';
+import { api, type AuditEvent } from '../../lib/api';
+
+export default function AuditPage(){const [events,setEvents]=useState<AuditEvent[]>();const [message,setMessage]=useState('');useEffect(()=>{api<{items:AuditEvent[]}>('/audit-events').then((r)=>setEvents(r.items)).catch((e)=>setMessage(e instanceof Error?e.message:'AUDIT_FAILED'));},[]);return <AppShell breadcrumb="Tenant / Audit log"><div className="page-heading"><div><p className="eyebrow">IMMUTABLE EVIDENCE</p><h1>Audit log</h1><p className="muted">Business and security events are append-only and redacted at the API boundary.</p></div><button className="button secondary" type="button" onClick={()=>window.location.reload()}>Refresh</button></div>{message?<div className="alert danger-box">{message}</div>:null}{!events&&!message?<LoadingState/>:null}<section className="panel table-panel">{events?.length?<table><thead><tr><th>Timestamp</th><th>Action</th><th>Actor</th><th>Resource</th><th>Metadata</th></tr></thead><tbody>{events.map((event)=><tr key={event.id}><td className="code small">{new Date(event.createdAt).toISOString()}</td><td><strong>{event.action}</strong></td><td className="code">{event.actorId}</td><td className="code">{event.resourceType}/{event.resourceId.slice(0,8)}</td><td className="code small">{JSON.stringify(event.metadata)}</td></tr>)}</tbody></table>:<div className="empty-state"><h2>No events</h2><p className="muted">Plans, approvals, syncs and operations will be recorded here.</p></div>}</section></AppShell>;}
