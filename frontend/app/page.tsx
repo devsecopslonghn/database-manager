@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import AuthButton from './components/AuthButton';
 
 const stats = [
   ['Targets', '0', 'No targets configured'],
@@ -12,7 +13,7 @@ export default function DashboardPage() {
     <main className="shell">
       <header className="topbar">
         <div><p className="eyebrow">DATABASE MIGRATION CONTROL PLANE</p><h1>SchemaOps</h1></div>
-        <span className="status-pill success">Control plane ready</span>
+        <div><span className="status-pill success">Control plane ready</span> <AuthButton /></div>
       </header>
       <section className="hero">
         <div><p className="eyebrow">OPERATIONS OVERVIEW</p><h2>Make database changes visible and controlled.</h2><p className="muted">Git-managed and manual migrations will use the same plan, approval, backup and audit lifecycle.</p></div>

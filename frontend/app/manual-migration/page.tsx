@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, type FormEvent } from 'react';
+import { getAccessToken, login } from '../../lib/oidc';
 
 export default function ManualMigrationPage() {
   const [message, setMessage] = useState('');
@@ -21,9 +22,14 @@ export default function ManualMigrationPage() {
       outOfOrder: Boolean(sequence),
     };
     try {
-      const response = await fetch(`${process.env.NEXT_PUBLIC_API_BASE_URL ?? ''}/api/v1/targets/${targetId}/manual-migrations`, {
+      const token = getAccessToken();
+      if (!token) {
+        await login('/manual-migration');
+        return;
+      }
+      const response = await fetch(`/api/v1/targets/${targetId}/manual-migrations`, {
         method: 'POST',
-        headers: { 'content-type': 'application/json', 'x-actor-id': 'local-development' },
+        headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` },
         body: JSON.stringify(payload),
       });
       const body = await response.json() as { id?: string; code?: string };

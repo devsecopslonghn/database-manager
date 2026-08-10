@@ -21,6 +21,13 @@ OIDC_ISSUER
 OIDC_AUDIENCE
 ```
 
+Production OIDC uses the Keycloak deployment in the `database-manager`
+namespace, realm `database-manager`, browser client `database-manager-web`,
+and API audience `database-manager-api`. The frontend completes Authorization
+Code + PKCE at `/auth/callback`; tokens stay in browser session storage and
+are sent only to the same-origin API. Realm definition is kept in the GitOps
+chart; users, passwords and runtime database secrets remain out of Git.
+
 The current shared PostgreSQL endpoint is `100.117.34.108:5433`, database
 `database_manager`, schema `schemaops`. The password must come from the approved
 secret manager and must not be placed in Git or shell history.
