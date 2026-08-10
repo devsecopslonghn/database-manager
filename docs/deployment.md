@@ -10,7 +10,9 @@ under `gitops/workloads.yaml`.
 ## Required runtime secret
 
 Create `database-manager-runtime` in the `database-manager` namespace through
-the approved secret manager. Do not commit it to Git. The backend requires:
+the approved secret manager. Do not commit it to Git. `DATABASE_URL` must point
+to the dedicated `database_manager` database; SchemaOps creates and uses the
+`schemaops` schema inside it. The backend requires:
 
 ```text
 DATABASE_URL
@@ -18,6 +20,10 @@ OIDC_JWKS_URL
 OIDC_ISSUER
 OIDC_AUDIENCE
 ```
+
+The current shared PostgreSQL endpoint is `100.117.34.108:5433`, database
+`database_manager`, schema `schemaops`. The password must come from the approved
+secret manager and must not be placed in Git or shell history.
 
 The namespace also requires the existing `nexus-registry` image pull secret.
 The non-secret Jenkins catalog example is `docs/ci-cd-config.example.yaml`.

@@ -6,7 +6,9 @@ slice with a Fastify backend and Next.js frontend.
 
 ## Local development
 
-Requirements: Node.js 20+, npm 10+, and PostgreSQL for the backend runtime.
+Requirements: Node.js 20+, npm 10+, and access to the dedicated SchemaOps
+PostgreSQL database `database_manager`. SchemaOps uses the `schemaops` schema
+inside that database.
 
 ```bash
 npm install
@@ -18,7 +20,7 @@ npm run build
 Run the backend with a PostgreSQL connection:
 
 ```bash
-DATABASE_URL='postgres://user:password@localhost:5432/schemaops' \
+DATABASE_URL='postgres://schemaops:password@100.117.34.108:5433/database_manager' \
   npm run dev --workspace backend
 ```
 

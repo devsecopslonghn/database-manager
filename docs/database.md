@@ -2,7 +2,7 @@
 
 ## 1. Database của SchemaOps
 
-Control-plane database dùng PostgreSQL. Đây là database của sản phẩm, không phải database mà sản phẩm migration target. Nó lưu metadata, state machine, policy, audit và log index; không lưu plaintext target credentials.
+Control-plane database dùng database PostgreSQL riêng `database_manager` và schema `schemaops`. Đây là database của sản phẩm, không phải database mà sản phẩm migration target. Nó lưu metadata, state machine, policy, audit và log index; không lưu plaintext target credentials. Schema `public` và các schema khác không thuộc phạm vi SchemaOps.
 
 ## 2. Core entities
 

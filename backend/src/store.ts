@@ -73,7 +73,7 @@ export class PostgresStore implements Store {
 
   async createProject(input: CreateProjectInput): Promise<Project> {
     const result = await this.pool.query(
-      `INSERT INTO projects (tenant_id, name, database_engine, repository_url, default_ref, migration_path)
+      `INSERT INTO schemaops.projects (tenant_id, name, database_engine, repository_url, default_ref, migration_path)
        VALUES ($1, $2, $3, $4, $5, $6)
        RETURNING id, tenant_id AS "tenantId", name, database_engine AS "databaseEngine",
                  repository_url AS "repositoryUrl", default_ref AS "defaultRef",
@@ -85,7 +85,7 @@ export class PostgresStore implements Store {
 
   async createTarget(input: CreateTargetInput): Promise<Target> {
     const result = await this.pool.query(
-      `INSERT INTO targets (project_id, environment_id, name, git_ref, database_name, schema_name, secret_ref)
+      `INSERT INTO schemaops.targets (project_id, environment_id, name, git_ref, database_name, schema_name, secret_ref)
        VALUES ($1, $2, $3, $4, $5, $6, $7)
        RETURNING id, project_id AS "projectId", environment_id AS "environmentId", name,
                  git_ref AS "gitRef", database_name AS "databaseName", schema_name AS "schemaName",
@@ -100,7 +100,7 @@ export class PostgresStore implements Store {
       `SELECT id, project_id AS "projectId", environment_id AS "environmentId", name,
               git_ref AS "gitRef", database_name AS "databaseName", schema_name AS "schemaName",
               secret_ref AS "secretRef", created_at AS "createdAt"
-       FROM targets WHERE id = $1`,
+       FROM schemaops.targets WHERE id = $1`,
       [id],
     );
     return result.rows[0] as Target | undefined;
@@ -108,7 +108,7 @@ export class PostgresStore implements Store {
 
   async createManualMigration(input: CreateManualMigrationInput): Promise<ManualMigration> {
     const result = await this.pool.query(
-      `INSERT INTO manual_migrations
+      `INSERT INTO schemaops.manual_migrations
        (target_id, sql_payload, checksum, version_context, execution_label,
         execution_sequence, out_of_order, reason, actor_id, status)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
@@ -129,7 +129,7 @@ export class PostgresStore implements Store {
               checksum, version_context AS "versionContext", execution_label AS "executionLabel",
               execution_sequence AS "executionSequence", out_of_order AS "outOfOrder", reason,
               actor_id AS "actorId", status, created_at AS "createdAt", updated_at AS "updatedAt"
-       FROM manual_migrations WHERE target_id = $1 ORDER BY created_at DESC`,
+       FROM schemaops.manual_migrations WHERE target_id = $1 ORDER BY created_at DESC`,
       [targetId],
     );
     return result.rows as ManualMigration[];
@@ -137,9 +137,9 @@ export class PostgresStore implements Store {
 
   async recordTargetAudit(input: AuditEventInput): Promise<void> {
     await this.pool.query(
-      `INSERT INTO audit_events (tenant_id, actor_id, action, resource_type, resource_id, metadata)
+      `INSERT INTO schemaops.audit_events (tenant_id, actor_id, action, resource_type, resource_id, metadata)
        SELECT p.tenant_id, $2, $3, $4, $5, $6::jsonb
-       FROM targets t JOIN projects p ON p.id = t.project_id
+       FROM schemaops.targets t JOIN schemaops.projects p ON p.id = t.project_id
        WHERE t.id = $1`,
       [input.targetId, input.actorId, input.action, input.resourceType, input.resourceId, JSON.stringify(input.metadata)],
     );

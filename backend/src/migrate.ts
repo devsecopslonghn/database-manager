@@ -11,7 +11,7 @@ const migrationDir = process.env.MIGRATION_DIR ?? join(process.cwd(), 'migration
 
 try {
   await pool.query(`
-    CREATE TABLE IF NOT EXISTS schemaops_schema_migrations (
+    CREATE TABLE IF NOT EXISTS schemaops.schemaops_schema_migrations (
       version TEXT PRIMARY KEY,
       checksum TEXT NOT NULL,
       applied_at TIMESTAMPTZ NOT NULL DEFAULT now()
@@ -21,7 +21,7 @@ try {
   for (const file of files) {
     const sql = await readFile(join(migrationDir, file), 'utf8');
     const checksum = createHash('sha256').update(sql, 'utf8').digest('hex');
-    const existing = await pool.query('SELECT checksum FROM schemaops_schema_migrations WHERE version = $1', [file]);
+    const existing = await pool.query('SELECT checksum FROM schemaops.schemaops_schema_migrations WHERE version = $1', [file]);
     if (existing.rowCount) {
       if (existing.rows[0].checksum !== checksum) throw new Error(`Migration checksum mismatch: ${file}`);
       continue;
@@ -30,7 +30,7 @@ try {
     try {
       await client.query('BEGIN');
       await client.query(sql);
-      await client.query('INSERT INTO schemaops_schema_migrations (version, checksum) VALUES ($1, $2)', [file, checksum]);
+      await client.query('INSERT INTO schemaops.schemaops_schema_migrations (version, checksum) VALUES ($1, $2)', [file, checksum]);
       await client.query('COMMIT');
       console.log(`applied ${file}`);
     } catch (error) {
