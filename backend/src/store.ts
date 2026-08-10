@@ -1,8 +1,8 @@
 import { randomUUID } from 'node:crypto';
 import type { Pool } from 'pg';
 import type {
-  AuditEvent, Environment, ExecutionLog, InventoryItem, LedgerEntry, ManualMigration, MigrationFile,
-  MigrationPlan, MigrationPlanItem, Operation, Project, SourceSnapshot, Target,
+  AuditEvent, BackupArtifact, BackupPlan, Environment, ExecutionLog, InventoryItem, LedgerEntry, ManualMigration, MigrationFile,
+  MigrationPlan, MigrationPlanItem, NativeHistoryImport, Operation, Project, SourceSnapshot, Target,
 } from './domain.js';
 
 export type CreateProjectInput = Omit<Project, 'id' | 'createdAt'>;
@@ -51,6 +51,12 @@ export interface Store {
   listOperations(targetId?: string): Promise<Operation[]>;
   appendExecutionLog(input: ExecutionLog): Promise<void>;
   listExecutionLogs(operationId: string): Promise<ExecutionLog[]>;
+  getBackupPlan(targetId: string): Promise<BackupPlan | undefined>;
+  upsertBackupPlan(input: Omit<BackupPlan, 'id' | 'createdAt'>): Promise<BackupPlan>;
+  createBackupArtifact(input: Omit<BackupArtifact, 'id' | 'createdAt'>): Promise<BackupArtifact>;
+  listBackupArtifacts(targetId: string): Promise<BackupArtifact[]>;
+  createNativeHistoryImport(input: Omit<NativeHistoryImport, 'id' | 'importedAt'>): Promise<NativeHistoryImport>;
+  listNativeHistoryImports(targetId: string): Promise<NativeHistoryImport[]>;
 }
 
 function now(): string { return new Date().toISOString(); }
@@ -67,6 +73,9 @@ export class MemoryStore implements Store {
   readonly plans: MigrationPlan[] = [];
   readonly operations: Operation[] = [];
   readonly executionLogs: ExecutionLog[] = [];
+  readonly backupPlans: BackupPlan[] = [];
+  readonly backupArtifacts: BackupArtifact[] = [];
+  readonly nativeHistoryImports: NativeHistoryImport[] = [];
 
   async ready(): Promise<void> {}
 
@@ -175,6 +184,12 @@ export class MemoryStore implements Store {
   async listOperations(targetId?: string): Promise<Operation[]> { return this.operations.filter((o) => !targetId || o.targetId === targetId).slice().reverse(); }
   async appendExecutionLog(input: ExecutionLog): Promise<void> { this.executionLogs.push(input); }
   async listExecutionLogs(operationId: string): Promise<ExecutionLog[]> { return this.executionLogs.filter((log) => log.operationId === operationId).sort((a, b) => a.sequence - b.sequence); }
+  async getBackupPlan(targetId: string): Promise<BackupPlan | undefined> { return this.backupPlans.find((plan) => plan.targetId === targetId); }
+  async upsertBackupPlan(input: Omit<BackupPlan, 'id' | 'createdAt'>): Promise<BackupPlan> { const existing=await this.getBackupPlan(input.targetId); if(existing){Object.assign(existing,input);return existing;} const plan={...input,id:randomUUID(),createdAt:now()}; this.backupPlans.push(plan); return plan; }
+  async createBackupArtifact(input: Omit<BackupArtifact, 'id' | 'createdAt'>): Promise<BackupArtifact> { const artifact={...input,id:randomUUID(),createdAt:now()}; this.backupArtifacts.push(artifact); return artifact; }
+  async listBackupArtifacts(targetId: string): Promise<BackupArtifact[]> { return this.backupArtifacts.filter((artifact)=>artifact.targetId===targetId).slice().reverse(); }
+  async createNativeHistoryImport(input: Omit<NativeHistoryImport, 'id' | 'importedAt'>): Promise<NativeHistoryImport> { const value={...input,id:randomUUID(),importedAt:now()}; this.nativeHistoryImports.push(value); return value; }
+  async listNativeHistoryImports(targetId: string): Promise<NativeHistoryImport[]> { return this.nativeHistoryImports.filter((item)=>item.targetId===targetId).slice().reverse(); }
 }
 
 export class PostgresStore implements Store {
@@ -277,4 +292,10 @@ export class PostgresStore implements Store {
   async listOperations(targetId?: string): Promise<Operation[]> { const result=await this.pool.query(`SELECT id,target_id AS "targetId",plan_id AS "planId",type,status,actor_id AS "actorId",correlation_id AS "correlationId",created_at AS "createdAt",started_at AS "startedAt",finished_at AS "finishedAt",error_message AS "errorMessage" FROM schemaops.operations ${targetId?'WHERE target_id=$1':''} ORDER BY created_at DESC`,targetId?[targetId]:[]); return result.rows as Operation[]; }
   async appendExecutionLog(input: ExecutionLog): Promise<void> { await this.pool.query(`INSERT INTO schemaops.execution_logs (operation_id,operation_item_id,sequence,stream,message,redacted,created_at) VALUES ($1,$2,$3,$4,$5,$6,$7)`,[input.operationId,input.operationItemId??null,input.sequence,input.stream,input.message,input.redacted,input.createdAt]); }
   async listExecutionLogs(operationId: string): Promise<ExecutionLog[]> { const result=await this.pool.query(`SELECT operation_id AS "operationId",operation_item_id AS "operationItemId",sequence,stream,message,redacted,created_at AS "createdAt" FROM schemaops.execution_logs WHERE operation_id=$1 ORDER BY sequence`,[operationId]); return result.rows as ExecutionLog[]; }
+  async getBackupPlan(targetId: string): Promise<BackupPlan|undefined> { const result=await this.pool.query(`SELECT id,target_id AS "targetId",script_ref AS "scriptRef",required_before_execute AS "requiredBeforeExecute",retention_days AS "retentionDays",created_at AS "createdAt" FROM schemaops.backup_plans WHERE target_id=$1`,[targetId]); return result.rows[0] as BackupPlan|undefined; }
+  async upsertBackupPlan(input: Omit<BackupPlan, 'id'|'createdAt'>): Promise<BackupPlan> { const result=await this.pool.query(`INSERT INTO schemaops.backup_plans (target_id,script_ref,required_before_execute,retention_days) VALUES ($1,$2,$3,$4) ON CONFLICT (target_id) DO UPDATE SET script_ref=EXCLUDED.script_ref,required_before_execute=EXCLUDED.required_before_execute,retention_days=EXCLUDED.retention_days RETURNING id,target_id AS "targetId",script_ref AS "scriptRef",required_before_execute AS "requiredBeforeExecute",retention_days AS "retentionDays",created_at AS "createdAt"`,[input.targetId,input.scriptRef,input.requiredBeforeExecute,input.retentionDays]); return result.rows[0] as BackupPlan; }
+  async createBackupArtifact(input: Omit<BackupArtifact, 'id'|'createdAt'>): Promise<BackupArtifact> { const result=await this.pool.query(`INSERT INTO schemaops.backup_artifacts (target_id,operation_id,scope_from_version,scope_to_version,artifact_ref,checksum,status,expires_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id,target_id AS "targetId",operation_id AS "operationId",scope_from_version AS "scopeFromVersion",scope_to_version AS "scopeToVersion",artifact_ref AS "artifactRef",checksum,status,created_at AS "createdAt",expires_at AS "expiresAt"`,[input.targetId,input.operationId??null,input.scopeFromVersion??null,input.scopeToVersion??null,input.artifactRef??null,input.checksum??null,input.status,input.expiresAt??null]); return result.rows[0] as BackupArtifact; }
+  async listBackupArtifacts(targetId: string): Promise<BackupArtifact[]> { const result=await this.pool.query(`SELECT id,target_id AS "targetId",operation_id AS "operationId",scope_from_version AS "scopeFromVersion",scope_to_version AS "scopeToVersion",artifact_ref AS "artifactRef",checksum,status,created_at AS "createdAt",expires_at AS "expiresAt" FROM schemaops.backup_artifacts WHERE target_id=$1 ORDER BY created_at DESC`,[targetId]); return result.rows as BackupArtifact[]; }
+  async createNativeHistoryImport(input: Omit<NativeHistoryImport, 'id'|'importedAt'>): Promise<NativeHistoryImport> { const result=await this.pool.query(`INSERT INTO schemaops.native_history_imports (target_id,engine,table_name,installed_rank,version,description,checksum,success,installed_at,evidence) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING id,target_id AS "targetId",engine,table_name AS "tableName",installed_rank AS "installedRank",version,description,checksum,success,installed_at AS "installedAt",imported_at AS "importedAt",evidence`,[input.targetId,input.engine,input.tableName,input.installedRank??null,input.version??null,input.description??null,input.checksum??null,input.success,input.installedAt??null,JSON.stringify(input.evidence)]); return result.rows[0] as NativeHistoryImport; }
+  async listNativeHistoryImports(targetId: string): Promise<NativeHistoryImport[]> { const result=await this.pool.query(`SELECT id,target_id AS "targetId",engine,table_name AS "tableName",installed_rank AS "installedRank",version,description,checksum,success,installed_at AS "installedAt",imported_at AS "importedAt",evidence FROM schemaops.native_history_imports WHERE target_id=$1 ORDER BY imported_at DESC`,[targetId]); return result.rows as NativeHistoryImport[]; }
 }

@@ -17,7 +17,7 @@ test('inventory, plan approval and execution remain auditable and fail closed wi
   const approval = await app.inject({ method: 'POST', url: `/api/v1/plans/${plan.id}/approval`, payload: { decision: 'APPROVED' } }); assert.equal(approval.statusCode, 200);
   const queued = await app.inject({ method: 'POST', url: `/api/v1/plans/${plan.id}/execute`, payload: {} }); assert.equal(queued.statusCode, 202); const operationId = (queued.json() as { operationId: string }).operationId;
   await executeOperation(store, operationId, { resolve: async () => undefined });
-  const operation = (await store.listOperations()).find((item) => item.id === operationId); assert.equal(operation?.status, 'FAILED'); assert.equal(operation?.errorMessage, 'TARGET_CONNECTION_NOT_AVAILABLE');
+  const operation = (await store.listOperations()).find((item) => item.id === operationId); assert.equal(operation?.status, 'FAILED'); assert.equal(operation?.errorMessage, 'BACKUP_ARTIFACT_REQUIRED');
   assert.equal((await store.listAuditEvents()).some((event) => event.action === 'migration_operation.failed'), true);
   await app.close();
 });

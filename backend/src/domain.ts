@@ -155,6 +155,10 @@ export type Operation = {
   errorMessage?: string;
 };
 
+export type BackupPlan = { id: string; targetId: string; scriptRef: string; requiredBeforeExecute: boolean; retentionDays: number; createdAt: string };
+export type BackupArtifact = { id: string; targetId: string; operationId?: string; scopeFromVersion?: string; scopeToVersion?: string; artifactRef?: string; checksum?: string; status: 'REQUESTED' | 'SUCCEEDED' | 'FAILED' | 'EXPIRED'; createdAt: string; expiresAt?: string };
+export type NativeHistoryImport = { id: string; targetId: string; engine: DatabaseEngine; tableName: string; installedRank?: number; version?: string; description?: string; checksum?: string; success: boolean; installedAt?: string; importedAt: string; evidence: Record<string, unknown> };
+
 export type ExecutionLog = {
   operationId: string;
   operationItemId?: string;

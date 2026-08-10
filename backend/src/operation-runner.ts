@@ -11,6 +11,11 @@ export async function executeOperation(store: Store, operationId: string, resolv
   let adapter: Awaited<ReturnType<typeof createDatabaseAdapter>> | undefined;
   try {
     await store.updateOperation(operation.id,{status:'RUNNING',startedAt:new Date().toISOString()});
+    const backupPlan = await store.getBackupPlan(target.id);
+    if (!backupPlan || backupPlan.requiredBeforeExecute) {
+      const artifacts = await store.listBackupArtifacts(target.id);
+      if (!artifacts.some((artifact) => artifact.status === 'SUCCEEDED')) throw new Error('BACKUP_ARTIFACT_REQUIRED');
+    }
     const connection = await resolver.resolve(target.secretRef,target.id);
     if (!connection) throw new Error('TARGET_CONNECTION_NOT_AVAILABLE');
     adapter = await createDatabaseAdapter(project.databaseEngine,connection);
