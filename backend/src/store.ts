@@ -3,8 +3,10 @@ import type { Pool } from 'pg';
 import type {
   AuditEvent, BackupArtifact, BackupPlan, ConnectionTestStatus, Environment, ExecutionLog, InventoryItem, LedgerEntry, ManualMigration, MigrationFile,
   MigrationPlan, MigrationPlanItem, NativeHistoryImport, Operation, Project, SecretBackend, SslMode, Target, TargetConnection, SourceSnapshot,
+  Tenant,
 } from './domain.js';
 
+export type CreateTenantInput = Omit<Tenant, 'id' | 'createdAt'>;
 export type CreateProjectInput = Omit<Project, 'id' | 'createdAt'>;
 export type CreateEnvironmentInput = Omit<Environment, 'id' | 'createdAt'>;
 export type CreateTargetInput = Omit<Target, 'id' | 'createdAt'>;
@@ -23,6 +25,8 @@ export type UpdateTargetConnectionInput = Omit<TargetConnection, 'engine' | 'cre
 
 export interface Store {
   ready(): Promise<void>;
+  createTenant(input: CreateTenantInput): Promise<Tenant>;
+  listTenants(): Promise<Tenant[]>;
   createProject(input: CreateProjectInput): Promise<Project>;
   getProject(id: string): Promise<Project | undefined>;
   listProjects(tenantId?: string): Promise<Project[]>;
@@ -35,10 +39,12 @@ export interface Store {
   updateTargetConnection(input: UpdateTargetConnectionInput): Promise<TargetConnection | undefined>;
   recordConnectionTest(targetId: string, result: { status: ConnectionTestStatus; durationMs: number; error?: string; testedAt: string }): Promise<TargetConnection | undefined>;
   createManualMigration(input: CreateManualMigrationInput): Promise<ManualMigration>;
+  getManualMigration(id: string): Promise<ManualMigration | undefined>;
   listManualMigrations(targetId: string): Promise<ManualMigration[]>;
   recordTargetAudit(input: AuditEventInput): Promise<void>;
   listAuditEvents(tenantId?: string, limit?: number): Promise<AuditEvent[]>;
   createSnapshot(input: CreateSnapshotInput): Promise<SourceSnapshot>;
+  getSnapshot(id: string): Promise<SourceSnapshot | undefined>;
   getLatestSnapshot(projectId: string, gitRef?: string): Promise<SourceSnapshot | undefined>;
   listMigrationFiles(snapshotId: string): Promise<MigrationFile[]>;
   listLedger(targetId: string): Promise<LedgerEntry[]>;
@@ -49,6 +55,7 @@ export interface Store {
   createPlan(input: CreatePlanInput): Promise<MigrationPlan>;
   getPlan(id: string): Promise<MigrationPlan | undefined>;
   listPlans(targetId?: string): Promise<MigrationPlan[]>;
+  updatePlanStatus(id: string, status: MigrationPlan['status']): Promise<MigrationPlan | undefined>;
   approvePlan(planId: string, actorId: string, decision: 'APPROVED' | 'REJECTED', reason?: string): Promise<MigrationPlan | undefined>;
   createOperation(input: Omit<Operation, 'id' | 'createdAt'>): Promise<Operation>;
   updateOperation(id: string, patch: Partial<Pick<Operation, 'status' | 'startedAt' | 'finishedAt' | 'errorMessage'>>): Promise<Operation | undefined>;
@@ -66,6 +73,7 @@ export interface Store {
 function now(): string { return new Date().toISOString(); }
 
 export class MemoryStore implements Store {
+  readonly tenants: Tenant[] = [];
   readonly projects: Project[] = [];
   readonly environments: Environment[] = [];
   readonly targets: Target[] = [];
@@ -83,6 +91,14 @@ export class MemoryStore implements Store {
   readonly targetConnections = new Map<string, TargetConnection>();
 
   async ready(): Promise<void> {}
+
+  async createTenant(input: CreateTenantInput): Promise<Tenant> {
+    const tenant: Tenant = { ...input, id: randomUUID(), createdAt: now() };
+    this.tenants.push(tenant);
+    return tenant;
+  }
+
+  async listTenants(): Promise<Tenant[]> { return [...this.tenants].sort((a, b) => a.name.localeCompare(b.name)); }
 
   async createProject(input: CreateProjectInput): Promise<Project> {
     const project: Project = { ...input, id: randomUUID(), createdAt: now() };
@@ -120,6 +136,7 @@ export class MemoryStore implements Store {
     return migration;
   }
 
+  async getManualMigration(id: string): Promise<ManualMigration | undefined> { return this.manualMigrations.find((migration) => migration.id === id); }
   async listManualMigrations(targetId: string): Promise<ManualMigration[]> { return this.manualMigrations.filter((m) => m.targetId === targetId); }
   async recordTargetAudit(input: AuditEventInput): Promise<void> { this.auditEvents.push(input); }
   async listAuditEvents(_tenantId?: string, limit = 100): Promise<AuditEvent[]> {
@@ -135,8 +152,9 @@ export class MemoryStore implements Store {
   }
 
   async getLatestSnapshot(projectId: string, gitRef?: string): Promise<SourceSnapshot | undefined> {
-    return [...this.snapshots].reverse().find((s) => s.projectId === projectId && (!gitRef || s.gitRef === gitRef));
+    return [...this.snapshots].reverse().find((s) => s.projectId === projectId && s.status === 'SUCCEEDED' && (!gitRef || s.gitRef === gitRef));
   }
+  async getSnapshot(id: string): Promise<SourceSnapshot | undefined> { return this.snapshots.find((snapshot) => snapshot.id === id); }
   async listMigrationFiles(snapshotId: string): Promise<MigrationFile[]> { return this.migrationFiles.filter((f) => f.snapshotId === snapshotId); }
   async listLedger(targetId: string): Promise<LedgerEntry[]> { return this.ledger.filter((entry) => entry.targetId === targetId); }
   async appendLedger(entry: Omit<LedgerEntry, 'id'>): Promise<LedgerEntry> { const value={...entry,id:randomUUID()}; this.ledger.push(value); return value; }
@@ -147,7 +165,7 @@ export class MemoryStore implements Store {
   async listInventory(targetId: string): Promise<InventoryItem[]> {
     const target = await this.getTarget(targetId);
     if (!target) return [];
-    const snapshot = await this.getLatestSnapshot(this.projects.find((p) => p.id === target.projectId)?.id ?? '');
+    const snapshot = await this.getLatestSnapshot(this.projects.find((p) => p.id === target.projectId)?.id ?? '', target.gitRef);
     if (!snapshot) return [];
     const files = await this.listMigrationFiles(snapshot.id);
     const ledger = await this.listLedger(targetId);
@@ -156,7 +174,7 @@ export class MemoryStore implements Store {
       const previous = [...ledger].reverse().find((entry) => entry.path === file.path);
       const repeatable = file.kind === 'REPEATABLE';
       return { migrationFileId: file.id, path: file.path, kind: file.kind, version: file.version, description: file.description, checksum: file.checksum,
-        status: previous?.state === 'FAILED' ? 'FAILED' : applied && applied.checksum === file.checksum ? (repeatable ? 'REPEATABLE' : 'APPLIED') : applied ? 'CHANGED' : 'PENDING',
+        status: previous?.state === 'FAILED' ? 'FAILED' : previous?.state === 'ROLLED_BACK' ? 'ROLLED_BACK' : applied && applied.checksum === file.checksum ? (repeatable ? 'REPEATABLE' : 'APPLIED') : applied ? 'CHANGED' : 'PENDING',
         appliedAt: applied?.appliedAt, executionSequence: applied?.executionSequence, outOfOrder: applied?.outOfOrder, sourceSnapshotId: snapshot.id };
     });
   }
@@ -170,6 +188,7 @@ export class MemoryStore implements Store {
   }
   async getPlan(id: string): Promise<MigrationPlan | undefined> { return this.plans.find((p) => p.id === id); }
   async listPlans(targetId?: string): Promise<MigrationPlan[]> { return this.plans.filter((p) => !targetId || p.targetId === targetId); }
+  async updatePlanStatus(id: string, status: MigrationPlan['status']): Promise<MigrationPlan | undefined> { const plan = await this.getPlan(id); if (!plan) return undefined; plan.status = status; plan.updatedAt = now(); return plan; }
   async approvePlan(planId: string, actorId: string, decision: 'APPROVED' | 'REJECTED', _reason?: string): Promise<MigrationPlan | undefined> {
     const plan = await this.getPlan(planId);
     if (!plan) return undefined;
@@ -203,6 +222,17 @@ export class MemoryStore implements Store {
 export class PostgresStore implements Store {
   constructor(private readonly pool: Pool) {}
   async ready(): Promise<void> { await this.pool.query('SELECT 1'); }
+
+  async createTenant(input: CreateTenantInput): Promise<Tenant> {
+    const result = await this.pool.query(`INSERT INTO schemaops.tenants (name,slug) VALUES ($1,$2)
+      RETURNING id,name,slug,created_at AS "createdAt"`, [input.name, input.slug]);
+    return result.rows[0] as Tenant;
+  }
+
+  async listTenants(): Promise<Tenant[]> {
+    const result = await this.pool.query(`SELECT id,name,slug,created_at AS "createdAt" FROM schemaops.tenants ORDER BY name`);
+    return result.rows as Tenant[];
+  }
 
   async createProject(input: CreateProjectInput): Promise<Project> {
     const result = await this.pool.query(`INSERT INTO schemaops.projects (tenant_id, name, database_engine, repository_url, default_ref, migration_path)
@@ -246,6 +276,7 @@ export class PostgresStore implements Store {
       [input.targetId,input.sqlPayload,input.checksum,input.versionContext ?? null,input.executionLabel ?? null,input.executionSequence ?? null,input.outOfOrder,input.reason ?? null,input.actorId,input.status]);
     return result.rows[0] as ManualMigration;
   }
+  async getManualMigration(id: string): Promise<ManualMigration | undefined> { const result = await this.pool.query(`SELECT id,target_id AS "targetId",source_type AS "sourceType",sql_payload AS "sqlPayload",checksum,version_context AS "versionContext",execution_label AS "executionLabel",execution_sequence AS "executionSequence",out_of_order AS "outOfOrder",reason,actor_id AS "actorId",status,created_at AS "createdAt",updated_at AS "updatedAt" FROM schemaops.manual_migrations WHERE id=$1`, [id]); return result.rows[0] as ManualMigration | undefined; }
   async listManualMigrations(targetId: string): Promise<ManualMigration[]> {
     const result = await this.pool.query(`SELECT id,target_id AS "targetId",source_type AS "sourceType",sql_payload AS "sqlPayload",checksum,version_context AS "versionContext",execution_label AS "executionLabel",execution_sequence AS "executionSequence",out_of_order AS "outOfOrder",reason,actor_id AS "actorId",status,created_at AS "createdAt",updated_at AS "updatedAt" FROM schemaops.manual_migrations WHERE target_id=$1 ORDER BY created_at DESC`, [targetId]);
     return result.rows as ManualMigration[];
@@ -272,6 +303,10 @@ export class PostgresStore implements Store {
     const result = await this.pool.query(`SELECT id,project_id AS "projectId",git_ref AS "gitRef",commit_sha AS "commitSha",source_fingerprint AS "sourceFingerprint",status,error_message AS "errorMessage",created_by AS "createdBy",created_at AS "createdAt" FROM schemaops.source_snapshots WHERE project_id=$1 ${gitRef ? 'AND git_ref=$2' : ''} ORDER BY created_at DESC LIMIT 1`, gitRef ? [projectId,gitRef] : [projectId]);
     return result.rows[0] as SourceSnapshot | undefined;
   }
+  async getSnapshot(id: string): Promise<SourceSnapshot | undefined> {
+    const result = await this.pool.query(`SELECT id,project_id AS "projectId",git_ref AS "gitRef",commit_sha AS "commitSha",source_fingerprint AS "sourceFingerprint",status,error_message AS "errorMessage",created_by AS "createdBy",created_at AS "createdAt" FROM schemaops.source_snapshots WHERE id=$1`, [id]);
+    return result.rows[0] as SourceSnapshot | undefined;
+  }
   async listMigrationFiles(snapshotId: string): Promise<MigrationFile[]> {
     const result = await this.pool.query(`SELECT id,snapshot_id AS "snapshotId",path,kind,version,description,checksum,sql_payload AS "sqlPayload",created_at AS "createdAt" FROM schemaops.migration_files WHERE snapshot_id=$1 ORDER BY kind,version,path`, [snapshotId]);
     return result.rows as MigrationFile[];
@@ -289,18 +324,19 @@ export class PostgresStore implements Store {
     const snapshot = await this.getLatestSnapshot(project.rows[0]?.projectId as string, target.gitRef);
     if (!snapshot) return [];
     const files = await this.listMigrationFiles(snapshot.id); const ledger = await this.listLedger(targetId);
-    return files.map((file) => { const applied = [...ledger].reverse().find((entry) => entry.path === file.path && entry.state === 'APPLIED'); const previous = [...ledger].reverse().find((entry) => entry.path === file.path); return { migrationFileId:file.id,path:file.path,kind:file.kind,version:file.version,description:file.description,checksum:file.checksum,status:previous?.state === 'FAILED' ? 'FAILED' : applied && applied.checksum === file.checksum ? (file.kind === 'REPEATABLE' ? 'REPEATABLE' : 'APPLIED') : applied ? 'CHANGED' : 'PENDING',appliedAt:applied?.appliedAt,executionSequence:applied?.executionSequence,outOfOrder:applied?.outOfOrder,sourceSnapshotId:snapshot.id }; });
+    return files.map((file) => { const applied = [...ledger].reverse().find((entry) => entry.path === file.path && entry.state === 'APPLIED'); const previous = [...ledger].reverse().find((entry) => entry.path === file.path); return { migrationFileId:file.id,path:file.path,kind:file.kind,version:file.version,description:file.description,checksum:file.checksum,status:previous?.state === 'FAILED' ? 'FAILED' : previous?.state === 'ROLLED_BACK' ? 'ROLLED_BACK' : applied && applied.checksum === file.checksum ? (file.kind === 'REPEATABLE' ? 'REPEATABLE' : 'APPLIED') : applied ? 'CHANGED' : 'PENDING',appliedAt:applied?.appliedAt,executionSequence:applied?.executionSequence, outOfOrder:applied?.outOfOrder, sourceSnapshotId:snapshot.id }; });
   }
   async createPlan(input: CreatePlanInput): Promise<MigrationPlan> {
-    const client = await this.pool.connect(); try { await client.query('BEGIN'); const result = await client.query(`INSERT INTO schemaops.migration_plans (target_id,snapshot_id,from_version,to_version,status,fingerprint,auto_approve,created_by,approved_by) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id,target_id AS "targetId",snapshot_id AS "snapshotId",from_version AS "fromVersion",to_version AS "toVersion",status,fingerprint,auto_approve AS "autoApprove",created_by AS "createdBy",approved_by AS "approvedBy",created_at AS "createdAt",updated_at AS "updatedAt"`, [input.targetId,input.snapshotId ?? null,input.fromVersion ?? null,input.toVersion ?? null,input.status,input.fingerprint,input.autoApprove,input.createdBy,input.approvedBy ?? null]); const plan = result.rows[0] as MigrationPlan; plan.items=[]; for (const item of input.items) { const itemResult = await client.query(`INSERT INTO schemaops.migration_plan_items (plan_id,migration_file_id,source_type,path,kind,version,checksum,execution_sequence,out_of_order,status) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING id,plan_id AS "planId",migration_file_id AS "migrationFileId",source_type AS "sourceType",path,kind,version,checksum,execution_sequence AS "executionSequence",out_of_order AS "outOfOrder",status`, [plan.id,item.migrationFileId ?? null,item.sourceType,item.path,item.kind,item.version ?? null,item.checksum,item.executionSequence,item.outOfOrder,item.status]); plan.items.push(itemResult.rows[0] as MigrationPlanItem); } await client.query('COMMIT'); return plan; } catch (error) { await client.query('ROLLBACK'); throw error; } finally { client.release(); }
+    const client = await this.pool.connect(); try { await client.query('BEGIN'); const result = await client.query(`INSERT INTO schemaops.migration_plans (target_id,snapshot_id,from_version,to_version,status,fingerprint,auto_approve,created_by,approved_by) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id,target_id AS "targetId",snapshot_id AS "snapshotId",from_version AS "fromVersion",to_version AS "toVersion",status,fingerprint,auto_approve AS "autoApprove",created_by AS "createdBy",approved_by AS "approvedBy",created_at AS "createdAt",updated_at AS "updatedAt"`, [input.targetId,input.snapshotId ?? null,input.fromVersion ?? null,input.toVersion ?? null,input.status,input.fingerprint,input.autoApprove,input.createdBy,input.approvedBy ?? null]); const plan = result.rows[0] as MigrationPlan; plan.items=[]; for (const item of input.items) { const itemResult = await client.query(`INSERT INTO schemaops.migration_plan_items (plan_id,migration_file_id,manual_migration_id,source_type,path,kind,version,checksum,execution_sequence,out_of_order,status) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING id,plan_id AS "planId",migration_file_id AS "migrationFileId",manual_migration_id AS "manualMigrationId",source_type AS "sourceType",path,kind,version,checksum,execution_sequence AS "executionSequence",out_of_order AS "outOfOrder",status`, [plan.id,item.migrationFileId ?? null,item.manualMigrationId ?? null,item.sourceType,item.path,item.kind,item.version ?? null,item.checksum,item.executionSequence,item.outOfOrder,item.status]); plan.items.push(itemResult.rows[0] as MigrationPlanItem); } await client.query('COMMIT'); return plan; } catch (error) { await client.query('ROLLBACK'); throw error; } finally { client.release(); }
   }
-  async getPlan(id: string): Promise<MigrationPlan | undefined> { const result=await this.pool.query(`SELECT id,target_id AS "targetId",snapshot_id AS "snapshotId",from_version AS "fromVersion",to_version AS "toVersion",status,fingerprint,auto_approve AS "autoApprove",created_by AS "createdBy",approved_by AS "approvedBy",created_at AS "createdAt",updated_at AS "updatedAt" FROM schemaops.migration_plans WHERE id=$1`,[id]); if(!result.rows[0]) return undefined; const plan=result.rows[0] as MigrationPlan; const items=await this.pool.query(`SELECT id,plan_id AS "planId",migration_file_id AS "migrationFileId",source_type AS "sourceType",path,kind,version,checksum,execution_sequence AS "executionSequence",out_of_order AS "outOfOrder",status FROM schemaops.migration_plan_items WHERE plan_id=$1 ORDER BY execution_sequence`,[id]); plan.items=items.rows as MigrationPlanItem[]; return plan; }
+  async getPlan(id: string): Promise<MigrationPlan | undefined> { const result=await this.pool.query(`SELECT id,target_id AS "targetId",snapshot_id AS "snapshotId",from_version AS "fromVersion",to_version AS "toVersion",status,fingerprint,auto_approve AS "autoApprove",created_by AS "createdBy",approved_by AS "approvedBy",created_at AS "createdAt",updated_at AS "updatedAt" FROM schemaops.migration_plans WHERE id=$1`,[id]); if(!result.rows[0]) return undefined; const plan=result.rows[0] as MigrationPlan; const items=await this.pool.query(`SELECT id,plan_id AS "planId",migration_file_id AS "migrationFileId",manual_migration_id AS "manualMigrationId",source_type AS "sourceType",path,kind,version,checksum,execution_sequence AS "executionSequence",out_of_order AS "outOfOrder",status FROM schemaops.migration_plan_items WHERE plan_id=$1 ORDER BY execution_sequence`,[id]); plan.items=items.rows as MigrationPlanItem[]; return plan; }
   async listPlans(targetId?: string): Promise<MigrationPlan[]> { const result=await this.pool.query(`SELECT id,target_id AS "targetId",snapshot_id AS "snapshotId",from_version AS "fromVersion",to_version AS "toVersion",status,fingerprint,auto_approve AS "autoApprove",created_by AS "createdBy",approved_by AS "approvedBy",created_at AS "createdAt",updated_at AS "updatedAt" FROM schemaops.migration_plans ${targetId?'WHERE target_id=$1':''} ORDER BY created_at DESC`,targetId?[targetId]:[]); const plans:MigrationPlan[]=[]; for(const row of result.rows as MigrationPlan[]) { const plan=await this.getPlan(row.id); if(plan) plans.push(plan); } return plans; }
+  async updatePlanStatus(id: string, status: MigrationPlan['status']): Promise<MigrationPlan | undefined> { const result=await this.pool.query(`UPDATE schemaops.migration_plans SET status=$2,updated_at=now() WHERE id=$1 RETURNING id`,[id,status]); return result.rowCount ? this.getPlan(id) : undefined; }
   async approvePlan(planId: string, actorId: string, decision: 'APPROVED' | 'REJECTED', reason?: string): Promise<MigrationPlan | undefined> { const result=await this.pool.query(`UPDATE schemaops.migration_plans SET status=$2,approved_by=$3,updated_at=now() WHERE id=$1 RETURNING id`,[planId,decision==='APPROVED'?'APPROVED':'REJECTED',actorId]); if(!result.rowCount) return undefined; await this.pool.query(`INSERT INTO schemaops.approvals (plan_id,actor_id,decision,reason) VALUES ($1,$2,$3,$4)`,[planId,actorId,decision,reason??null]); return this.getPlan(planId); }
-  async createOperation(input: Omit<Operation, 'id' | 'createdAt'>): Promise<Operation> { const result=await this.pool.query(`INSERT INTO schemaops.operations (target_id,plan_id,type,status,actor_id,correlation_id,started_at,finished_at,error_message) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id,target_id AS "targetId",plan_id AS "planId",type,status,actor_id AS "actorId",correlation_id AS "correlationId",created_at AS "createdAt",started_at AS "startedAt",finished_at AS "finishedAt",error_message AS "errorMessage"`,[input.targetId,input.planId??null,input.type,input.status,input.actorId,input.correlationId,input.startedAt??null,input.finishedAt??null,input.errorMessage??null]); return result.rows[0] as Operation; }
-  async updateOperation(id: string, patch: Partial<Pick<Operation, 'status'|'startedAt'|'finishedAt'|'errorMessage'>>): Promise<Operation|undefined> { const fields: string[]=[]; const values: unknown[]=[id]; for(const [key,value] of Object.entries(patch)){ const column=key.replace(/[A-Z]/g,(letter)=>`_${letter.toLowerCase()}`); fields.push(`${column}=$${values.length+1}`); values.push(value??null); } if(!fields.length) return this.getOperation(id); const result=await this.pool.query(`UPDATE schemaops.operations SET ${fields.join(',')} WHERE id=$1 RETURNING id,target_id AS "targetId",plan_id AS "planId",type,status,actor_id AS "actorId",correlation_id AS "correlationId",created_at AS "createdAt",started_at AS "startedAt",finished_at AS "finishedAt",error_message AS "errorMessage"`,values); return result.rows[0] as Operation|undefined; }
-  private async getOperation(id:string):Promise<Operation|undefined>{ const rows=await this.pool.query(`SELECT id,target_id AS "targetId",plan_id AS "planId",type,status,actor_id AS "actorId",correlation_id AS "correlationId",created_at AS "createdAt",started_at AS "startedAt",finished_at AS "finishedAt",error_message AS "errorMessage" FROM schemaops.operations WHERE id=$1`,[id]); return rows.rows[0] as Operation|undefined; }
-  async listOperations(targetId?: string): Promise<Operation[]> { const result=await this.pool.query(`SELECT id,target_id AS "targetId",plan_id AS "planId",type,status,actor_id AS "actorId",correlation_id AS "correlationId",created_at AS "createdAt",started_at AS "startedAt",finished_at AS "finishedAt",error_message AS "errorMessage" FROM schemaops.operations ${targetId?'WHERE target_id=$1':''} ORDER BY created_at DESC`,targetId?[targetId]:[]); return result.rows as Operation[]; }
+  async createOperation(input: Omit<Operation, 'id' | 'createdAt'>): Promise<Operation> { const result=await this.pool.query(`INSERT INTO schemaops.operations (target_id,plan_id,source_operation_id,type,status,actor_id,correlation_id,started_at,finished_at,error_message) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING id,target_id AS "targetId",plan_id AS "planId",source_operation_id AS "sourceOperationId",type,status,actor_id AS "actorId",correlation_id AS "correlationId",created_at AS "createdAt",started_at AS "startedAt",finished_at AS "finishedAt",error_message AS "errorMessage"`,[input.targetId,input.planId??null,input.sourceOperationId??null,input.type,input.status,input.actorId,input.correlationId,input.startedAt??null,input.finishedAt??null,input.errorMessage??null]); return result.rows[0] as Operation; }
+  async updateOperation(id: string, patch: Partial<Pick<Operation, 'status'|'startedAt'|'finishedAt'|'errorMessage'>>): Promise<Operation|undefined> { const fields: string[]=[]; const values: unknown[]=[id]; for(const [key,value] of Object.entries(patch)){ const column=key.replace(/[A-Z]/g,(letter)=>`_${letter.toLowerCase()}`); fields.push(`${column}=$${values.length+1}`); values.push(value??null); } if(!fields.length) return this.getOperation(id); const result=await this.pool.query(`UPDATE schemaops.operations SET ${fields.join(',')} WHERE id=$1 RETURNING id,target_id AS "targetId",plan_id AS "planId",source_operation_id AS "sourceOperationId",type,status,actor_id AS "actorId",correlation_id AS "correlationId",created_at AS "createdAt",started_at AS "startedAt",finished_at AS "finishedAt",error_message AS "errorMessage"`,values); return result.rows[0] as Operation|undefined; }
+  private async getOperation(id:string):Promise<Operation|undefined>{ const rows=await this.pool.query(`SELECT id,target_id AS "targetId",plan_id AS "planId",source_operation_id AS "sourceOperationId",type,status,actor_id AS "actorId",correlation_id AS "correlationId",created_at AS "createdAt",started_at AS "startedAt",finished_at AS "finishedAt",error_message AS "errorMessage" FROM schemaops.operations WHERE id=$1`,[id]); return rows.rows[0] as Operation|undefined; }
+  async listOperations(targetId?: string): Promise<Operation[]> { const result=await this.pool.query(`SELECT id,target_id AS "targetId",plan_id AS "planId",source_operation_id AS "sourceOperationId",type,status,actor_id AS "actorId",correlation_id AS "correlationId",created_at AS "createdAt",started_at AS "startedAt",finished_at AS "finishedAt",error_message AS "errorMessage" FROM schemaops.operations ${targetId?'WHERE target_id=$1':''} ORDER BY created_at DESC`,targetId?[targetId]:[]); return result.rows as Operation[]; }
   async appendExecutionLog(input: ExecutionLog): Promise<void> { await this.pool.query(`INSERT INTO schemaops.execution_logs (operation_id,operation_item_id,sequence,stream,message,redacted,created_at) VALUES ($1,$2,$3,$4,$5,$6,$7)`,[input.operationId,input.operationItemId??null,input.sequence,input.stream,input.message,input.redacted,input.createdAt]); }
   async listExecutionLogs(operationId: string): Promise<ExecutionLog[]> { const result=await this.pool.query(`SELECT operation_id AS "operationId",operation_item_id AS "operationItemId",sequence,stream,message,redacted,created_at AS "createdAt" FROM schemaops.execution_logs WHERE operation_id=$1 ORDER BY sequence`,[operationId]); return result.rows as ExecutionLog[]; }
   async getBackupPlan(targetId: string): Promise<BackupPlan|undefined> { const result=await this.pool.query(`SELECT id,target_id AS "targetId",script_ref AS "scriptRef",required_before_execute AS "requiredBeforeExecute",retention_days AS "retentionDays",created_at AS "createdAt" FROM schemaops.backup_plans WHERE target_id=$1`,[targetId]); return result.rows[0] as BackupPlan|undefined; }

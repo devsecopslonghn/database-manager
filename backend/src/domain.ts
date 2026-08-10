@@ -3,6 +3,13 @@ import { createHash } from 'node:crypto';
 export const databaseEngines = ['postgresql', 'mysql', 'oracle', 'sqlserver'] as const;
 export type DatabaseEngine = (typeof databaseEngines)[number];
 
+export type Tenant = {
+  id: string;
+  name: string;
+  slug: string;
+  createdAt: string;
+};
+
 export type Project = {
   id: string;
   tenantId: string;
@@ -141,6 +148,7 @@ export type MigrationPlanItem = {
   planId: string;
   sourceType: 'GIT' | 'MANUAL_UI';
   migrationFileId?: string;
+  manualMigrationId?: string;
   path: string;
   kind: string;
   version?: string;
@@ -170,6 +178,7 @@ export type Operation = {
   id: string;
   targetId: string;
   planId?: string;
+  sourceOperationId?: string;
   type: 'SYNC' | 'PREFLIGHT' | 'EXECUTE' | 'UNDO' | 'RESTORE' | 'BACKUP';
   status: 'QUEUED' | 'RUNNING' | 'PAUSED' | 'SUCCEEDED' | 'FAILED' | 'CANCELLED';
   actorId: string;

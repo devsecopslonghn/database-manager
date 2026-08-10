@@ -16,25 +16,19 @@
 ```text
 GET    /tenants
 POST   /tenants
-GET    /tenants/{tenantId}
-GET    /tenants/{tenantId}/members
-POST   /tenants/{tenantId}/role-bindings
-DELETE /tenants/{tenantId}/role-bindings/{bindingId}
 ```
 
 ### Projects, environments and targets
 
 ```text
-GET    /tenants/{tenantId}/projects
-POST   /tenants/{tenantId}/projects
-GET    /projects/{projectId}
-PATCH  /projects/{projectId}
-POST   /projects/{projectId}/environments
 GET    /projects/{projectId}/environments
-POST   /environments/{environmentId}/targets
-GET    /targets/{targetId}
-PATCH  /targets/{targetId}
-POST   /targets/{targetId}/connection-tests
+POST   /environments
+POST   /targets
+GET    /targets
+GET    /targets/{targetId}/connection
+PUT    /targets/{targetId}/connection
+POST   /targets/{targetId}/connection/test
+POST   /targets/{targetId}/connection/rotate
 ```
 
 Create target request chỉ nhận `secretRef`, không nhận cơ chế trả credential value trong response.
@@ -52,11 +46,11 @@ Webhook/provider-specific endpoints để phase sau. Core sync endpoint vẫn d�
 ### Migration discovery and plans
 
 ```text
-POST /targets/{targetId}/validate
 POST /targets/{targetId}/plans
 GET  /plans/{planId}
-GET  /plans/{planId}/items
-POST /plans/{planId}/dry-run
+POST /plans/{planId}/preflight
+POST /plans/{planId}/approval
+POST /plans/{planId}/execute
 ```
 
 Plan request có source snapshot/commit, optional `fromVersion`, `toVersion`, selected items, backup profile và execution policy. `dry-run` không mutate target.
@@ -66,7 +60,6 @@ Plan request có source snapshot/commit, optional `fromVersion`, `toVersion`, se
 ```text
 POST /targets/{targetId}/manual-migrations
 GET  /targets/{targetId}/manual-migrations
-GET  /manual-migrations/{manualMigrationId}
 POST /manual-migrations/{manualMigrationId}/plan
 ```
 
@@ -75,23 +68,20 @@ Create request gồm SQL payload, optional version context, execution label, `ex
 ### Approval and execution
 
 ```text
-POST /plans/{planId}/approve
-POST /plans/{planId}/auto-approve
-POST /plans/{planId}/execute
 GET  /operations/{operationId}
-POST /operations/{operationId}/cancel
-GET  /operations/{operationId}/items
-GET  /operations/{operationId}/logs
+GET  /targets/{targetId}/operations
+POST /operations/{operationId}/rollback/undo
 ```
 
-Approval request phải ghi actor/policy version. Auto-approve ghi `actorType=SYSTEM` và policy reason.
+Approval request ghi actor và reason trong audit/approval history. Auto-approve policy là capability mở rộng sau MVP.
 
 ### Backup and rollback
 
 ```text
 POST /targets/{targetId}/backup-plans
 GET  /targets/{targetId}/backup-plans
-POST /operations/{operationId}/rollback/undo
+POST /targets/{targetId}/backup-artifacts
+POST /targets/{targetId}/backup
 POST /targets/{targetId}/rollback/restore
 GET  /targets/{targetId}/backup-artifacts
 ```
@@ -101,10 +91,10 @@ Restore request phải tham chiếu artifact cụ thể và chịu destructive-a
 ### State and audit
 
 ```text
-GET /targets/{targetId}/migrations
-GET /targets/{targetId}/history
+GET /targets/{targetId}/inventory
+GET /targets/{targetId}/ledger
 GET /targets/{targetId}/drift
-GET /audit-events?tenantId=...&targetId=...&from=...&to=...
+GET /audit-events
 ```
 
 ## 3. Operation state machine
@@ -126,7 +116,7 @@ State transition phải được validate ở backend; client không được t�
 MVP có thể dùng API sequence:
 
 ```text
-sync -> validate -> plan -> approve/auto-approve -> execute -> poll operation -> fetch logs
+sync(target gitRef) -> inventory -> plan -> preflight -> approve -> execute -> poll operation -> fetch logs
 ```
 
 Webhook callback, signed callbacks và provider-specific status checks là phase 2. API phải tạo correlation ID để pipeline liên kết với commit/build.
@@ -151,6 +141,15 @@ target secret reference resolves to a mounted JSON connection document, the
 target lock is acquired and the plan is approved. `SCHEMAOPS_OPERATION_WORKER_ENABLED`
 must be explicitly enabled for a deployment; otherwise queueing is audited but
 does not touch a target database.
+
+Git plans are pinned to the exact successful source snapshot used by inventory;
+target Git refs are synced independently. Manual SQL enters the same
+plan/preflight/approval/execution/ledger pipeline with source type `MANUAL_UI`
+without creating or changing a Git snapshot. Undo creates a separate operation,
+executes matching `U<version>` files in reverse order, and appends immutable
+ledger/audit evidence. Restore is an explicit artifact-based operation; a
+provider-specific restore worker is still required before it can mutate a
+target database.
 
 ### Target connection management
 

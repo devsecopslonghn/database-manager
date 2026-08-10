@@ -61,7 +61,8 @@ PostgreSQL schema migration and OIDC settings are present.
 
 ## Current safety boundary
 
-The implemented backend stores manual migration metadata and does not execute
-SQL against target databases yet. Do not expose the manual migration endpoint
-as a production execution mechanism until RBAC, tenant scope, planner, target
-adapter, backup preflight and operation lock are implemented and tested.
+The deployed worker executes approved Git and `MANUAL_UI` plans only after
+preflight, target lock and secret resolution. Backup artifacts are currently
+recorded as external attestations; a provider-specific backup/restore worker
+must be integrated before `/backup` or restore operations can perform the
+actual data-plane action.

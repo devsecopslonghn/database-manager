@@ -14,7 +14,9 @@ export function actorFromClaims(id: string, claims: Record<string, unknown>): Ac
     ...(Array.isArray(realmAccess?.roles) ? realmAccess.roles.filter((role): role is string => typeof role === 'string') : []),
     ...(Array.isArray(resourceAccess?.['database-manager-api']?.roles) ? resourceAccess['database-manager-api'].roles.filter((role): role is string => typeof role === 'string') : []),
   ];
-  return { id, roles: [...new Set(roles)] };
+  const tenantClaim = claims.tenant_ids ?? claims.tenantIds ?? claims['https://schemaops.dev/tenant_ids'];
+  const tenantIds = Array.isArray(tenantClaim) ? tenantClaim.filter((value): value is string => typeof value === 'string') : undefined;
+  return { id, roles: [...new Set(roles)], tenantIds: tenantIds?.length ? [...new Set(tenantIds)] : undefined };
 }
 
 export function can(actor: Actor, permission: Permission): boolean {

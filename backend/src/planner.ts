@@ -3,6 +3,7 @@ import type { Store } from './store.js';
 
 export function pendingInventory(inventory: InventoryItem[], fromVersion?: string, toVersion?: string): InventoryItem[] {
   return inventory.filter((item) => {
+    if (item.kind === 'UNDO') return false;
     if (!['PENDING', 'CHANGED', 'FAILED'].includes(item.status)) return false;
     if (fromVersion && item.version && item.version.localeCompare(fromVersion, undefined, { numeric: true }) <= 0) return false;
     if (toVersion && item.version && item.version.localeCompare(toVersion, undefined, { numeric: true }) > 0) return false;

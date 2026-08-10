@@ -140,4 +140,4 @@ API cũng hỗ trợ tạo manual migration từ payload SQL, nhưng endpoint n�
 5. Undo rollback tạo operation/audit riêng, không sửa lịch sử gốc.
 6. Không thể execute nếu backup policy bắt buộc nhưng backup preflight thất bại.
 7. Pod restart không làm mất trạng thái operation hoặc execution log đã persist.
-8. Manual SQL được lưu cùng checksum và audit, nhưng không xuất hiện trong Git snapshot hoặc Git sync result.
+8. Manual SQL được lưu cùng checksum và audit, đi qua plan/preflight/approval/execution như Git migration, nhưng không xuất hiện trong Git snapshot hoặc Git sync result.
