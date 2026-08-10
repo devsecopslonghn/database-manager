@@ -4,8 +4,8 @@ export async function api<T>(path: string, init?: RequestInit): Promise<T> {
   const token = getAccessToken();
   if (!token) { await login(window.location.pathname); throw new Error('AUTH_REQUIRED'); }
   const response = await fetch(`/api/v1${path}`, { ...init, headers: { 'content-type': 'application/json', ...(init?.headers ?? {}), authorization: `Bearer ${token}` }, cache: 'no-store' });
-  const body = await response.json().catch(() => ({})) as T & { code?: string; message?: string };
-  if (!response.ok) throw new Error(body.code ?? body.message ?? `REQUEST_FAILED_${response.status}`);
+  const body = await response.json().catch(() => ({})) as T & { code?: string; message?: string; errorMessage?: string };
+  if (!response.ok) throw new Error(body.code ?? body.message ?? body.errorMessage ?? `REQUEST_FAILED_${response.status}`);
   return body;
 }
 

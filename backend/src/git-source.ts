@@ -33,6 +33,8 @@ export async function syncProjectSource(store: Store, projectId: string, gitRef:
     const files: Array<{ path: string; sqlPayload: string }> = [];
     await collectSqlFiles(sourceRoot, sourceRoot, files);
     const parsed = parseMigrationFiles(files);
+    const existing = await store.getSnapshotByCommit(projectId, ref, commitSha);
+    if (existing?.status === 'SUCCEEDED') return existing;
     return store.createSnapshot({
       projectId,
       gitRef: ref,

@@ -11,6 +11,7 @@ COPY backend/migrations backend/migrations
 RUN npm run build --workspace backend
 
 FROM node:20.19.6-alpine
+RUN apk add --no-cache git ca-certificates
 ENV NODE_ENV=production
 WORKDIR /app
 COPY --from=build /workspace/node_modules ./node_modules

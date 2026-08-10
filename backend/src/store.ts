@@ -45,6 +45,7 @@ export interface Store {
   listAuditEvents(tenantId?: string, limit?: number): Promise<AuditEvent[]>;
   createSnapshot(input: CreateSnapshotInput): Promise<SourceSnapshot>;
   getSnapshot(id: string): Promise<SourceSnapshot | undefined>;
+  getSnapshotByCommit(projectId: string, gitRef: string, commitSha: string): Promise<SourceSnapshot | undefined>;
   getLatestSnapshot(projectId: string, gitRef?: string): Promise<SourceSnapshot | undefined>;
   listMigrationFiles(snapshotId: string): Promise<MigrationFile[]>;
   listLedger(targetId: string): Promise<LedgerEntry[]>;
@@ -155,6 +156,9 @@ export class MemoryStore implements Store {
     return [...this.snapshots].reverse().find((s) => s.projectId === projectId && s.status === 'SUCCEEDED' && (!gitRef || s.gitRef === gitRef));
   }
   async getSnapshot(id: string): Promise<SourceSnapshot | undefined> { return this.snapshots.find((snapshot) => snapshot.id === id); }
+  async getSnapshotByCommit(projectId: string, gitRef: string, commitSha: string): Promise<SourceSnapshot | undefined> {
+    return this.snapshots.find((snapshot) => snapshot.projectId === projectId && snapshot.gitRef === gitRef && snapshot.commitSha === commitSha);
+  }
   async listMigrationFiles(snapshotId: string): Promise<MigrationFile[]> { return this.migrationFiles.filter((f) => f.snapshotId === snapshotId); }
   async listLedger(targetId: string): Promise<LedgerEntry[]> { return this.ledger.filter((entry) => entry.targetId === targetId); }
   async appendLedger(entry: Omit<LedgerEntry, 'id'>): Promise<LedgerEntry> { const value={...entry,id:randomUUID()}; this.ledger.push(value); return value; }
@@ -300,11 +304,15 @@ export class PostgresStore implements Store {
     } catch (error) { await client.query('ROLLBACK'); throw error; } finally { client.release(); }
   }
   async getLatestSnapshot(projectId: string, gitRef?: string): Promise<SourceSnapshot | undefined> {
-    const result = await this.pool.query(`SELECT id,project_id AS "projectId",git_ref AS "gitRef",commit_sha AS "commitSha",source_fingerprint AS "sourceFingerprint",status,error_message AS "errorMessage",created_by AS "createdBy",created_at AS "createdAt" FROM schemaops.source_snapshots WHERE project_id=$1 ${gitRef ? 'AND git_ref=$2' : ''} ORDER BY created_at DESC LIMIT 1`, gitRef ? [projectId,gitRef] : [projectId]);
+    const result = await this.pool.query(`SELECT id,project_id AS "projectId",git_ref AS "gitRef",commit_sha AS "commitSha",source_fingerprint AS "sourceFingerprint",status,error_message AS "errorMessage",created_by AS "createdBy",created_at AS "createdAt" FROM schemaops.source_snapshots WHERE project_id=$1 AND status='SUCCEEDED' ${gitRef ? 'AND git_ref=$2' : ''} ORDER BY created_at DESC LIMIT 1`, gitRef ? [projectId,gitRef] : [projectId]);
     return result.rows[0] as SourceSnapshot | undefined;
   }
   async getSnapshot(id: string): Promise<SourceSnapshot | undefined> {
     const result = await this.pool.query(`SELECT id,project_id AS "projectId",git_ref AS "gitRef",commit_sha AS "commitSha",source_fingerprint AS "sourceFingerprint",status,error_message AS "errorMessage",created_by AS "createdBy",created_at AS "createdAt" FROM schemaops.source_snapshots WHERE id=$1`, [id]);
+    return result.rows[0] as SourceSnapshot | undefined;
+  }
+  async getSnapshotByCommit(projectId: string, gitRef: string, commitSha: string): Promise<SourceSnapshot | undefined> {
+    const result = await this.pool.query(`SELECT id,project_id AS "projectId",git_ref AS "gitRef",commit_sha AS "commitSha",source_fingerprint AS "sourceFingerprint",status,error_message AS "errorMessage",created_by AS "createdBy",created_at AS "createdAt" FROM schemaops.source_snapshots WHERE project_id=$1 AND git_ref=$2 AND commit_sha=$3`, [projectId, gitRef, commitSha]);
     return result.rows[0] as SourceSnapshot | undefined;
   }
   async listMigrationFiles(snapshotId: string): Promise<MigrationFile[]> {
