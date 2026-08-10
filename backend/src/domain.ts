@@ -16,6 +16,7 @@ export type Project = {
   name: string;
   databaseEngine: DatabaseEngine;
   repositoryUrl: string;
+  gitSecretRef?: string;
   defaultRef: string;
   migrationPath: string;
   createdAt: string;

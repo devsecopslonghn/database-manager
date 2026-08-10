@@ -1,10 +1,11 @@
 import { execFile } from 'node:child_process';
-import { mkdtemp, readFile, readdir, rm } from 'node:fs/promises';
+import { chmod, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, relative } from 'node:path';
 import { promisify } from 'node:util';
 import { fingerprint } from './domain.js';
 import { parseMigrationFiles } from './migration-parser.js';
+import { KubernetesConnectionSecretStore } from './secret-store.js';
 import type { Store } from './store.js';
 
 const execFileAsync = promisify(execFile);
@@ -25,8 +26,18 @@ export async function syncProjectSource(store: Store, projectId: string, gitRef:
   const url = new URL(project.repositoryUrl);
   if (url.username || url.password) throw new Error('REPOSITORY_CREDENTIALS_MUST_USE_WORKLOAD_IDENTITY');
   const workspace = await mkdtemp(join(tmpdir(), 'schemaops-git-'));
+  let askpass: string | undefined;
   try {
-    await execFileAsync('git', ['clone', '--depth', '1', '--branch', ref, '--no-tags', project.repositoryUrl, workspace], { timeout: 120_000, maxBuffer: 1_000_000 });
+    const environment = { ...process.env, GIT_TERMINAL_PROMPT: '0' };
+    if (project.gitSecretRef) {
+      const credentials = await new KubernetesConnectionSecretStore().readGitCredentials(project.gitSecretRef);
+      if (!credentials) throw new Error('GIT_CREDENTIAL_SECRET_NOT_FOUND_OR_INVALID');
+      askpass = join(workspace, '.git-askpass');
+      await writeFile(askpass, '#!/bin/sh\ncase "$1" in *Username*) printf \'%s\' "$GIT_USERNAME" ;; *) printf \'%s\' "$GIT_TOKEN" ;; esac\n', { mode: 0o700 });
+      await chmod(askpass, 0o700);
+      Object.assign(environment, { GIT_ASKPASS: askpass, GIT_USERNAME: credentials.username, GIT_TOKEN: credentials.token });
+    }
+    await execFileAsync('git', ['clone', '--depth', '1', '--branch', ref, '--no-tags', project.repositoryUrl, workspace], { timeout: 120_000, maxBuffer: 1_000_000, env: environment });
     const revision = await execFileAsync('git', ['-C', workspace, 'rev-parse', 'HEAD'], { timeout: 10_000, maxBuffer: 100_000 });
     const commitSha = revision.stdout.trim();
     const sourceRoot = join(workspace, project.migrationPath);
@@ -45,7 +56,8 @@ export async function syncProjectSource(store: Store, projectId: string, gitRef:
       files: parsed,
     });
   } catch (error) {
-    const message = error instanceof Error ? error.message.split('\n')[0].slice(0, 500) : 'GIT_SYNC_FAILED';
+    const rawMessage = error instanceof Error ? error.message : 'GIT_SYNC_FAILED';
+    const message = /could not read Username|authentication failed|repository not found/i.test(rawMessage) ? 'GIT_CREDENTIALS_REQUIRED' : rawMessage.split('\n')[0].slice(0, 500);
     return store.createSnapshot({ projectId, gitRef: ref, commitSha: 'unknown', sourceFingerprint: 'unknown', status: 'FAILED', errorMessage: message, createdBy: actorId, files: [] });
   } finally {
     await rm(workspace, { recursive: true, force: true });

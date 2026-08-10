@@ -3,6 +3,7 @@ import { createDatabaseAdapter, type DatabaseAdapter, type SecretResolver, type 
 import type { DatabaseEngine, SecretBackend, SslMode } from './domain.js';
 
 export type ConnectionSecret = { engine: DatabaseEngine; host: string; port: number; database: string; schema: string; username: string; password: string; sslMode: SslMode; timeoutSeconds: number };
+export type GitCredentials = { username: string; token: string };
 export type SecretVersion = { version?: string };
 
 export interface ConnectionSecretStore {
@@ -55,6 +56,21 @@ export class KubernetesConnectionSecretStore implements ConnectionSecretStore, S
       const status = (error as { response?: { statusCode?: number } }).response?.statusCode;
       if (status === 404) return undefined;
       throw new Error('KUBERNETES_SECRET_READ_FAILED');
+    }
+  }
+
+  async readGitCredentials(secretRef: string): Promise<GitCredentials | undefined> {
+    validateSecretName(secretRef);
+    try {
+      const secret = await this.api.readNamespacedSecret({ name: secretRef, namespace: this.namespace });
+      const data = secret.data ?? {};
+      const token = decode(data.token ?? data.password);
+      if (!token) return undefined;
+      return { username: decode(data.username) || 'x-access-token', token };
+    } catch (error) {
+      const status = (error as { response?: { statusCode?: number } }).response?.statusCode;
+      if (status === 404) return undefined;
+      throw new Error('KUBERNETES_GIT_SECRET_READ_FAILED');
     }
   }
 

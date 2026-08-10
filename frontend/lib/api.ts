@@ -11,7 +11,7 @@ export async function api<T>(path: string, init?: RequestInit): Promise<T> {
 
 export type Dashboard = { metrics: { projects: number; targets: number; pendingMigrations: number; failedRuns: number }; projects: Project[]; targets: Target[]; operations: Operation[]; audit: AuditEvent[] };
 export type Tenant = { id: string; name: string; slug: string; createdAt: string };
-export type Project = { id: string; tenantId: string; name: string; databaseEngine: string; repositoryUrl: string; defaultRef: string; migrationPath: string; createdAt: string };
+export type Project = { id: string; tenantId: string; name: string; databaseEngine: string; repositoryUrl: string; gitSecretRef?: string; defaultRef: string; migrationPath: string; createdAt: string };
 export type Environment = { id: string; projectId: string; name: string; createdAt: string };
 export type Target = { id: string; projectId: string; environmentId: string; name: string; gitRef: string; databaseName: string; schemaName: string; secretRef: string; createdAt: string };
 export type TargetConnection = { targetId: string; engine: string; host: string; port: number; databaseName: string; schemaName: string; username: string; secretBackend: string; secretRef: string; sslMode: string; timeoutSeconds: number; credentialVersion?: string; lastTestStatus?: string; lastTestAt?: string; lastTestDurationMs?: number; lastTestError?: string; updatedAt?: string; updatedBy?: string };

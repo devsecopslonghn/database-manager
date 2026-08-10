@@ -29,6 +29,7 @@ export interface Store {
   listTenants(): Promise<Tenant[]>;
   createProject(input: CreateProjectInput): Promise<Project>;
   getProject(id: string): Promise<Project | undefined>;
+  updateProjectGitSecretRef(id: string, gitSecretRef?: string): Promise<Project | undefined>;
   listProjects(tenantId?: string): Promise<Project[]>;
   createEnvironment(input: CreateEnvironmentInput): Promise<Environment>;
   listEnvironments(projectId: string): Promise<Environment[]>;
@@ -109,6 +110,7 @@ export class MemoryStore implements Store {
 
   async listProjects(tenantId?: string): Promise<Project[]> { return this.projects.filter((p) => !tenantId || p.tenantId === tenantId); }
   async getProject(id: string): Promise<Project | undefined> { return this.projects.find((project) => project.id === id); }
+  async updateProjectGitSecretRef(id: string, gitSecretRef?: string): Promise<Project | undefined> { const project=await this.getProject(id); if(!project) return undefined; project.gitSecretRef=gitSecretRef; return project; }
 
   async createEnvironment(input: CreateEnvironmentInput): Promise<Environment> {
     const environment: Environment = { ...input, id: randomUUID(), createdAt: now() };
@@ -239,14 +241,15 @@ export class PostgresStore implements Store {
   }
 
   async createProject(input: CreateProjectInput): Promise<Project> {
-    const result = await this.pool.query(`INSERT INTO schemaops.projects (tenant_id, name, database_engine, repository_url, default_ref, migration_path)
-      VALUES ($1,$2,$3,$4,$5,$6) RETURNING id,tenant_id AS "tenantId",name,database_engine AS "databaseEngine",repository_url AS "repositoryUrl",default_ref AS "defaultRef",migration_path AS "migrationPath",created_at AS "createdAt"`,
-      [input.tenantId, input.name, input.databaseEngine, input.repositoryUrl, input.defaultRef, input.migrationPath]);
+    const result = await this.pool.query(`INSERT INTO schemaops.projects (tenant_id, name, database_engine, repository_url, git_secret_ref, default_ref, migration_path)
+      VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING id,tenant_id AS "tenantId",name,database_engine AS "databaseEngine",repository_url AS "repositoryUrl",git_secret_ref AS "gitSecretRef",default_ref AS "defaultRef",migration_path AS "migrationPath",created_at AS "createdAt"`,
+      [input.tenantId, input.name, input.databaseEngine, input.repositoryUrl, input.gitSecretRef ?? null, input.defaultRef, input.migrationPath]);
     return result.rows[0] as Project;
   }
-  async getProject(id: string): Promise<Project | undefined> { const result=await this.pool.query(`SELECT id,tenant_id AS "tenantId",name,database_engine AS "databaseEngine",repository_url AS "repositoryUrl",default_ref AS "defaultRef",migration_path AS "migrationPath",created_at AS "createdAt" FROM schemaops.projects WHERE id=$1`,[id]); return result.rows[0] as Project|undefined; }
+  async getProject(id: string): Promise<Project | undefined> { const result=await this.pool.query(`SELECT id,tenant_id AS "tenantId",name,database_engine AS "databaseEngine",repository_url AS "repositoryUrl",git_secret_ref AS "gitSecretRef",default_ref AS "defaultRef",migration_path AS "migrationPath",created_at AS "createdAt" FROM schemaops.projects WHERE id=$1`,[id]); return result.rows[0] as Project|undefined; }
+  async updateProjectGitSecretRef(id: string, gitSecretRef?: string): Promise<Project | undefined> { const result=await this.pool.query(`UPDATE schemaops.projects SET git_secret_ref=$2 WHERE id=$1 RETURNING id`,[id,gitSecretRef??null]); return result.rowCount ? this.getProject(id) : undefined; }
   async listProjects(tenantId?: string): Promise<Project[]> {
-    const result = await this.pool.query(`SELECT id,tenant_id AS "tenantId",name,database_engine AS "databaseEngine",repository_url AS "repositoryUrl",default_ref AS "defaultRef",migration_path AS "migrationPath",created_at AS "createdAt" FROM schemaops.projects ${tenantId ? 'WHERE tenant_id=$1' : ''} ORDER BY name`, tenantId ? [tenantId] : []);
+    const result = await this.pool.query(`SELECT id,tenant_id AS "tenantId",name,database_engine AS "databaseEngine",repository_url AS "repositoryUrl",git_secret_ref AS "gitSecretRef",default_ref AS "defaultRef",migration_path AS "migrationPath",created_at AS "createdAt" FROM schemaops.projects ${tenantId ? 'WHERE tenant_id=$1' : ''} ORDER BY name`, tenantId ? [tenantId] : []);
     return result.rows as Project[];
   }
   async createEnvironment(input: CreateEnvironmentInput): Promise<Environment> {
