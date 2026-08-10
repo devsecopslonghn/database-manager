@@ -1,8 +1,8 @@
 import { randomUUID } from 'node:crypto';
 import type { Pool } from 'pg';
 import type {
-  AuditEvent, BackupArtifact, BackupPlan, Environment, ExecutionLog, InventoryItem, LedgerEntry, ManualMigration, MigrationFile,
-  MigrationPlan, MigrationPlanItem, NativeHistoryImport, Operation, Project, SourceSnapshot, Target,
+  AuditEvent, BackupArtifact, BackupPlan, ConnectionTestStatus, Environment, ExecutionLog, InventoryItem, LedgerEntry, ManualMigration, MigrationFile,
+  MigrationPlan, MigrationPlanItem, NativeHistoryImport, Operation, Project, SecretBackend, SslMode, Target, TargetConnection, SourceSnapshot,
 } from './domain.js';
 
 export type CreateProjectInput = Omit<Project, 'id' | 'createdAt'>;
@@ -19,6 +19,7 @@ export type AuditEventInput = {
 };
 export type CreateSnapshotInput = Omit<SourceSnapshot, 'id' | 'createdAt'> & { files: Array<Omit<MigrationFile, 'id' | 'snapshotId' | 'createdAt'>> };
 export type CreatePlanInput = Omit<MigrationPlan, 'id' | 'createdAt' | 'updatedAt' | 'items'> & { items: Array<Omit<MigrationPlanItem, 'id' | 'planId'>> };
+export type UpdateTargetConnectionInput = Omit<TargetConnection, 'engine' | 'credentialVersion' | 'lastTestStatus' | 'lastTestAt' | 'lastTestDurationMs' | 'lastTestError' | 'updatedAt' | 'updatedBy'> & { updatedBy: string; credentialVersion?: string };
 
 export interface Store {
   ready(): Promise<void>;
@@ -30,6 +31,9 @@ export interface Store {
   createTarget(input: CreateTargetInput): Promise<Target>;
   listTargets(projectId?: string): Promise<Target[]>;
   getTarget(id: string): Promise<Target | undefined>;
+  getTargetConnection(targetId: string): Promise<TargetConnection | undefined>;
+  updateTargetConnection(input: UpdateTargetConnectionInput): Promise<TargetConnection | undefined>;
+  recordConnectionTest(targetId: string, result: { status: ConnectionTestStatus; durationMs: number; error?: string; testedAt: string }): Promise<TargetConnection | undefined>;
   createManualMigration(input: CreateManualMigrationInput): Promise<ManualMigration>;
   listManualMigrations(targetId: string): Promise<ManualMigration[]>;
   recordTargetAudit(input: AuditEventInput): Promise<void>;
@@ -76,6 +80,7 @@ export class MemoryStore implements Store {
   readonly backupPlans: BackupPlan[] = [];
   readonly backupArtifacts: BackupArtifact[] = [];
   readonly nativeHistoryImports: NativeHistoryImport[] = [];
+  readonly targetConnections = new Map<string, TargetConnection>();
 
   async ready(): Promise<void> {}
 
@@ -104,6 +109,9 @@ export class MemoryStore implements Store {
 
   async listTargets(projectId?: string): Promise<Target[]> { return this.targets.filter((t) => !projectId || t.projectId === projectId); }
   async getTarget(id: string): Promise<Target | undefined> { return this.targets.find((target) => target.id === id); }
+  async getTargetConnection(targetId: string): Promise<TargetConnection | undefined> { const existing=this.targetConnections.get(targetId); if(existing) return existing; const target=await this.getTarget(targetId); const project=target?await this.getProject(target.projectId):undefined; if(!target||!project) return undefined; return {targetId,engine:project.databaseEngine,host:'',port:0,databaseName:target.databaseName,schemaName:target.schemaName,username:'',secretBackend:'kubernetes',secretRef:target.secretRef,sslMode:'require',timeoutSeconds:30}; }
+  async updateTargetConnection(input: UpdateTargetConnectionInput): Promise<TargetConnection | undefined> { const current=await this.getTargetConnection(input.targetId); if(!current) return undefined; const value={...current,...input,updatedAt:now(),updatedBy:input.updatedBy}; this.targetConnections.set(input.targetId,value); const target=await this.getTarget(input.targetId); if(target){target.databaseName=input.databaseName;target.schemaName=input.schemaName;target.secretRef=input.secretRef;} return value; }
+  async recordConnectionTest(targetId: string, result: { status: ConnectionTestStatus; durationMs: number; error?: string; testedAt: string }): Promise<TargetConnection | undefined> { const current=await this.getTargetConnection(targetId); if(!current) return undefined; const value={...current,lastTestStatus:result.status,lastTestAt:result.testedAt,lastTestDurationMs:result.durationMs,lastTestError:result.error}; this.targetConnections.set(targetId,value); return value; }
 
   async createManualMigration(input: CreateManualMigrationInput): Promise<ManualMigration> {
     const timestamp = now();
@@ -229,6 +237,9 @@ export class PostgresStore implements Store {
     const result = await this.pool.query(`SELECT id,project_id AS "projectId",environment_id AS "environmentId",name,git_ref AS "gitRef",database_name AS "databaseName",schema_name AS "schemaName",secret_ref AS "secretRef",created_at AS "createdAt" FROM schemaops.targets WHERE id=$1`, [id]);
     return result.rows[0] as Target | undefined;
   }
+  async getTargetConnection(targetId: string): Promise<TargetConnection | undefined> { const result=await this.pool.query(`SELECT t.id AS "targetId",p.database_engine AS engine,t.connection_host AS host,t.connection_port AS port,t.database_name AS "databaseName",t.schema_name AS "schemaName",t.connection_username AS username,t.secret_backend AS "secretBackend",t.secret_ref AS "secretRef",t.ssl_mode AS "sslMode",t.connection_timeout_seconds AS "timeoutSeconds",t.credential_version AS "credentialVersion",t.last_connection_test_status AS "lastTestStatus",t.last_connection_test_at AS "lastTestAt",t.last_connection_test_duration_ms AS "lastTestDurationMs",t.last_connection_test_error AS "lastTestError",t.connection_updated_at AS "updatedAt",t.connection_updated_by AS "updatedBy" FROM schemaops.targets t JOIN schemaops.projects p ON p.id=t.project_id WHERE t.id=$1`,[targetId]); return result.rows[0] as TargetConnection|undefined; }
+  async updateTargetConnection(input: UpdateTargetConnectionInput): Promise<TargetConnection | undefined> { const result=await this.pool.query(`UPDATE schemaops.targets SET connection_host=$2,connection_port=$3,database_name=$4,schema_name=$5,connection_username=$6,secret_backend=$7,secret_ref=$8,ssl_mode=$9,connection_timeout_seconds=$10,credential_version=COALESCE($11,credential_version),connection_updated_at=now(),connection_updated_by=$12 WHERE id=$1 RETURNING id`,[input.targetId,input.host,input.port,input.databaseName,input.schemaName,input.username,input.secretBackend,input.secretRef,input.sslMode,input.timeoutSeconds,input.credentialVersion??null,input.updatedBy]); if(!result.rowCount) return undefined; return this.getTargetConnection(input.targetId); }
+  async recordConnectionTest(targetId: string, result: { status: ConnectionTestStatus; durationMs: number; error?: string; testedAt: string }): Promise<TargetConnection | undefined> { await this.pool.query(`UPDATE schemaops.targets SET last_connection_test_status=$2,last_connection_test_at=$3,last_connection_test_duration_ms=$4,last_connection_test_error=$5 WHERE id=$1`,[targetId,result.status,result.testedAt,result.durationMs,result.error??null]); return this.getTargetConnection(targetId); }
   async createManualMigration(input: CreateManualMigrationInput): Promise<ManualMigration> {
     const result = await this.pool.query(`INSERT INTO schemaops.manual_migrations (target_id,sql_payload,checksum,version_context,execution_label,execution_sequence,out_of_order,reason,actor_id,status)
       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING id,target_id AS "targetId",source_type AS "sourceType",sql_payload AS "sqlPayload",checksum,version_context AS "versionContext",execution_label AS "executionLabel",execution_sequence AS "executionSequence",out_of_order AS "outOfOrder",reason,actor_id AS "actorId",status,created_at AS "createdAt",updated_at AS "updatedAt"`,

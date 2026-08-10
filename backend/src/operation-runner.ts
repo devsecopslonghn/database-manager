@@ -1,7 +1,8 @@
-import { createDatabaseAdapter, MountedSecretResolver, type SecretResolver } from './database-adapters.js';
+import { createDatabaseAdapter, type SecretResolver } from './database-adapters.js';
+import { KubernetesConnectionSecretStore } from './secret-store.js';
 import type { Store } from './store.js';
 
-export async function executeOperation(store: Store, operationId: string, resolver: SecretResolver = new MountedSecretResolver()): Promise<void> {
+export async function executeOperation(store: Store, operationId: string, resolver: SecretResolver = new KubernetesConnectionSecretStore()): Promise<void> {
   const operation = (await store.listOperations()).find((item) => item.id === operationId);
   if (!operation || !operation.planId) return;
   const plan = await store.getPlan(operation.planId); const target = await store.getTarget(operation.targetId); if (!plan || !target) return;

@@ -151,3 +151,21 @@ target secret reference resolves to a mounted JSON connection document, the
 target lock is acquired and the plan is approved. `SCHEMAOPS_OPERATION_WORKER_ENABLED`
 must be explicitly enabled for a deployment; otherwise queueing is audited but
 does not touch a target database.
+
+### Target connection management
+
+Admin connection setup is exposed through:
+
+```text
+GET  /targets/{targetId}/connection
+PUT  /targets/{targetId}/connection
+POST /targets/{targetId}/connection/test
+POST /targets/{targetId}/connection/rotate
+GET  /targets/{targetId}/connection/audit
+```
+
+For the Kubernetes backend, the API writes an `Opaque` Secret in the configured
+namespace using the supplied `secretRef`. Only non-secret connection metadata,
+resource version and test result are stored in `schemaops.targets`. Vault and
+External Secrets are metadata-only integrations until their provider resolver
+is configured; the API rejects plaintext password writes for those backends.

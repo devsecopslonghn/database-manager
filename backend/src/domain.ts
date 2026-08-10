@@ -33,6 +33,31 @@ export type Target = {
   createdAt: string;
 };
 
+export type SecretBackend = 'kubernetes' | 'vault' | 'external-secrets';
+export type SslMode = 'disable' | 'require' | 'verify-ca' | 'verify-full';
+export type ConnectionTestStatus = 'HEALTHY' | 'FAILED' | 'TIMEOUT' | 'AUTHENTICATION_FAILED' | 'NETWORK_UNREACHABLE' | 'SCHEMA_UNAVAILABLE';
+
+export type TargetConnection = {
+  targetId: string;
+  engine: DatabaseEngine;
+  host: string;
+  port: number;
+  databaseName: string;
+  schemaName: string;
+  username: string;
+  secretBackend: SecretBackend;
+  secretRef: string;
+  sslMode: SslMode;
+  timeoutSeconds: number;
+  credentialVersion?: string;
+  lastTestStatus?: ConnectionTestStatus;
+  lastTestAt?: string;
+  lastTestDurationMs?: number;
+  lastTestError?: string;
+  updatedAt?: string;
+  updatedBy?: string;
+};
+
 export type ManualMigration = {
   id: string;
   targetId: string;
@@ -180,11 +205,11 @@ export type AuditEvent = {
   createdAt: string;
 };
 
-export type Permission = 'target:view' | 'target:sync' | 'migration:plan' | 'migration:execute' | 'migration:rollback' | 'access:admin';
+export type Permission = 'target:view' | 'target:sync' | 'connection:test' | 'migration:plan' | 'migration:execute' | 'migration:rollback' | 'access:admin';
 
 export const rolePermissions: Record<'TENANT_ADMIN' | 'OPERATOR' | 'VIEWER', Permission[]> = {
   TENANT_ADMIN: ['target:view', 'target:sync', 'migration:plan', 'migration:execute', 'migration:rollback', 'access:admin'],
-  OPERATOR: ['target:view', 'target:sync', 'migration:plan', 'migration:execute', 'migration:rollback'],
+  OPERATOR: ['target:view', 'target:sync', 'connection:test', 'migration:plan', 'migration:execute', 'migration:rollback'],
   VIEWER: ['target:view'],
 };
 
